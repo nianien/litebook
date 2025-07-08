@@ -21,7 +21,7 @@ class Article(Base):
     author_id = Column(Integer, ForeignKey("users.id"))
     author = relationship("User", back_populates="articles")
     views = relationship("ViewRecord", back_populates="article")
-    category = Column(String, default="未分类", index=True)
+    category = Column(String(64), default="未分类", index=True)
 
 class ViewRecord(Base):
     __tablename__ = "view_records"

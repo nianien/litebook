@@ -3,6 +3,7 @@
 <head>
     <title>{% block title %}我的博客{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}?v=60.0">
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', path='/favicon.ico') }}">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 <body>
@@ -10,7 +11,7 @@
         <nav>
             <a href="/" class="logo" id="home-link">📝 我的博客</a>
             <ul class="nav-links">
-                <li><a href="/">首页</a></li>
+                <li><a href="/" id="nav-home-link">首页</a></li>
                 {% if user %}
                     <li><a href="/new">写文章</a></li>
                     <li><a href="/history">浏览历史</a></li>
@@ -44,5 +45,25 @@
         </div>
     </footer>
     {% block scripts %}{% endblock %}
+    <script>
+(function() {
+    // 处理 logo 点击
+    var homeLink = document.getElementById('home-link');
+    if (homeLink) {
+        homeLink.addEventListener('click', function(e) {
+            localStorage.removeItem('currentArticleId');
+            window.location.href = '/';
+        });
+    }
+    // 处理“首页”菜单点击
+    var navHomeLink = document.getElementById('nav-home-link');
+    if (navHomeLink) {
+        navHomeLink.addEventListener('click', function(e) {
+            localStorage.removeItem('currentArticleId');
+            window.location.href = '/';
+        });
+    }
+})();
+</script>
 </body>
 </html>

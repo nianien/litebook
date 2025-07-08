@@ -25,9 +25,9 @@ def group_articles_by_category(articles):
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request, db: Session = Depends(deps.get_db)):
     per_page = 10
-    # 查询所有题材
     categories = [row[0] for row in db.query(models.Article.category).distinct().all()]
     grouped_data = []
+    first_article = None
     for category in categories:
         cat_id = category.replace(' ', '_').replace('（', '_').replace('）', '_').replace('(', '_').replace(')', '_').replace('/', '_').replace('\\', '_')
         page_param = f"page_{cat_id}"
@@ -36,7 +36,6 @@ def index(request: Request, db: Session = Depends(deps.get_db)):
         articles = crud.get_articles_by_category(db, category, skip=skip, limit=per_page)
         total_articles = crud.get_articles_count_by_category(db, category)
         total_pages = (total_articles + per_page - 1) // per_page
-        # 计算分页区间
         start_page = max(1, current_page - 2)
         end_page = min(total_pages, current_page + 2)
         page_numbers = list(range(start_page, end_page + 1))
@@ -50,11 +49,14 @@ def index(request: Request, db: Session = Depends(deps.get_db)):
             "start_page": start_page,
             "end_page": end_page,
         })
+        if not first_article and articles:
+            first_article = articles[0]
     user = get_current_user_from_cookie(request, db)
     response = templates.TemplateResponse("index.html", {
         "request": request,
         "user": user,
         "grouped_data": grouped_data,
+        "first_article": first_article,
     })
     response.headers["Content-Type"] = "text/html; charset=utf-8"
     return response

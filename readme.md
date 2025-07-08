@@ -1,4 +1,5 @@
 
+# gcp中Project与Repo、Image的关系
 ```text
 #GCP Project（nianien）
  #│
@@ -13,28 +14,77 @@
  #└── IAM 权限设置
 
 ```
+# GCP Artifact Registry Docker Image Path
+[LOCATION]-docker.pkg.dev/[PROJECT-ID]/[REPOSITORY]/[IMAGE]
 
-#用命令行添加角色 Editor 或 Cloud Build Editor：
+# 用命令行添加角色 Editor 或 Cloud Build Editor：
 ```shell
 gcloud projects add-iam-policy-binding nianien \
   --member="user:nianien@gmail.com" \
   --role="roles/cloudbuild.builds.editor" 
 ```
-# GCP Artifact Registry Docker Image Path
-[LOCATION]-docker.pkg.dev/[PROJECT-ID]/[REPOSITORY]/[IMAGE]
 
-
-# FastAPI Blog
-
-## 运行
-
-```bash
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+# 设置当前project
+```shell
+gcloud config set project nianien
 ```
 
-访问: http://127.0.0.1:8000
+# 绑定账单账户
+```shell
+gcloud beta billing projects link nianien \
+  --billing-account=01D488-A4C3C6-D364A1
+```
 
-- 注册/登录
-- 发布/浏览/编辑/删除文章
-- 记录浏览历史
+# 创建 Artifact Registry 仓库
+```shell
+gcloud artifacts repositories create liteblog \
+  --repository-format=docker \
+  --location=asia-east1 \
+  --description="lite blog by FastAPI"
+```
+
+
+# 配置权限
+```shell
+gcloud auth configure-docker asia-east1-docker.pkg.dev
+```
+# 本地构建
+```shell
+# 构建镜像
+#确保登录并设置Docker认证
+gcloud auth login
+gcloud auth configure-docker asia-east1-docker.pkg.dev
+# 推送镜像到Artifact Registry
+docker buildx build \
+  --platform linux/amd64 \
+  -t asia-east1-docker.pkg.dev/nianien/liteblog/liteblog-app:latest \
+  --push .
+```
+
+# 远程构建(建议)
+```shell
+gcloud builds submit \
+  --tag asia-east1-docker.pkg.dev/nianien/liteblog/liteblog-app:latest .
+```
+
+# 部署启动
+```shell
+gcloud run deploy liteblog \
+  --image asia-east1-docker.pkg.dev/nianien/liteblog/liteblog-app:latest \
+  --platform managed \
+  --region asia-east1 \
+  --allow-unauthenticated
+```
+
+# 本地测试
+```shell
+# 构建镜像
+docker build -t liteblog:latest .
+# 删除旧容器
+docker rm -f liteblog_app
+# 运行容器
+docker run -d --name liteblog_app -p 8000:8080 --env-file .env liteblog:latest
+
+# 查看日志
+docker logs --tail 50 liteblog_app
+```

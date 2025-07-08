@@ -60,10 +60,16 @@
     
     <!-- 右侧文章内容 -->
     <div class="content-area" id="article-content">
-        <div class="empty-state">
-            <h3>📖 选择文章</h3>
-            <p>从左侧列表中选择一篇文章来阅读</p>
-        </div>
+        {% if first_article %}
+            {% set can_edit = user and first_article.author and user.id == first_article.author.id %}
+            {% set article = first_article %}
+            {% include "article_content.html" %}
+        {% else %}
+            <div class="empty-state">
+                <h3>📖 选择文章</h3>
+                <p>从左侧列表中选择一篇文章来阅读</p>
+            </div>
+        {% endif %}
     </div>
 </div>
 
@@ -73,18 +79,19 @@
 <script>
 // 文章点击加载与高亮，并记录到localStorage
 function loadArticle(articleId) {
-    document.querySelectorAll('.article-item').forEach(item => {
+    document.querySelectorAll('.article-item').forEach(function(item) {
         item.classList.remove('active');
     });
-    const currentItem = document.querySelector(`[data-article-id="${articleId}"]`);
+    var currentItem = document.querySelector('[data-article-id="' + articleId + '"]');
     if (currentItem) {
         currentItem.classList.add('active');
     }
-    fetch(`/article/${articleId}/content`)
-        .then(response => response.json())
-        .then(data => {
-            const contentArea = document.getElementById('article-content');
+    fetch('/article/' + articleId + '/content')
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            var contentArea = document.getElementById('article-content');
             contentArea.innerHTML =
+                '<div class="card">' +
                 (data.can_edit ?
                 '<div class="article-actions-top">' +
                     '<a href="/article/' + articleId + '/edit" class="action-link edit">✏️ 编辑</a>' +
@@ -92,16 +99,13 @@ function loadArticle(articleId) {
                     '<a href="#" onclick="deleteArticle(' + articleId + ')" class="action-link delete">🗑️ 删除</a>' +
                 '</div>' : '') +
                 '<h1>' + data.title + '</h1>' +
-                '<div class="article-content">' +
-                    data.content +
-                '</div>' +
-                '<div class="article-meta right">' +
-                    data.author + ' • ' + data.created_at +
+                '<div class="article-content">' + data.content + '</div>' +
+                '<div class="article-meta right">' + data.author + ' • ' + data.created_at + '</div>' +
                 '</div>';
         })
-        .catch(error => {
-            console.error('Error loading article:', error);
-            document.getElementById('article-content').innerHTML =
+        .catch(function(error) {
+            var contentArea = document.getElementById('article-content');
+            contentArea.innerHTML =
                 '<div class="empty-state">' +
                     '<h3>❌ 加载失败</h3>' +
                     '<p>无法加载文章内容，请稍后重试</p>' +
@@ -121,12 +125,10 @@ window.addEventListener('DOMContentLoaded', function() {
         loadArticle(currentId);
         item.scrollIntoView({block: 'center'});
     } else {
-        // 没有currentId或当前页没有该ID，自动加载当前页第一篇
+        // SSR 已渲染第一篇，无需自动 loadArticle
         var firstItem = document.querySelector('.article-item');
         if (firstItem) {
-            var firstId = firstItem.getAttribute('data-article-id');
             firstItem.classList.add('active');
-            loadArticle(firstId);
             firstItem.scrollIntoView({block: 'center'});
         }
     }
