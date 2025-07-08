@@ -60,10 +60,14 @@
     
     <!-- 右侧文章内容 -->
     <div class="content-area" id="article-content">
-        {% if first_article %}
-            {% set can_edit = user and first_article.author and user.id == first_article.author.id %}
-            {% set article = first_article %}
-            {% include "article_content.html" %}
+        {% if first_article is defined and first_article %}
+            <div class="card">
+                <h1>{{ first_article.title }}</h1>
+                <div class="article-content">{{ first_article.content }}</div>
+                <div class="article-meta right">
+                    {{ first_article.author.username if first_article.author else '匿名' }} • {{ first_article.created_at.strftime('%Y-%m-%d %H:%M') if first_article.created_at else '' }}
+                </div>
+            </div>
         {% else %}
             <div class="empty-state">
                 <h3>📖 选择文章</h3>
@@ -77,18 +81,56 @@
 
 {% block scripts %}
 <script>
-// 文章点击加载与高亮，并记录到localStorage
+// 全局变量
+var currentArticleId = null;
+
+// 显示空白状态
+function showEmptyState() {
+    var contentArea = document.getElementById('article-content');
+    if (contentArea) {
+        contentArea.innerHTML = 
+            '<div class="empty-state">' +
+                '<h3>📖 选择文章</h3>' +
+                '<p>从左侧列表中选择一篇文章来阅读</p>' +
+            '</div>';
+    }
+}
+
+// 加载文章内容
 function loadArticle(articleId) {
+    if (!articleId) {
+        showEmptyState();
+        return;
+    }
+    
+    console.log('DEBUG: loadArticle called with articleId =', articleId);
+    
+    // 更新当前文章ID
+    currentArticleId = articleId;
+    
+    // 更新高亮状态
     document.querySelectorAll('.article-item').forEach(function(item) {
         item.classList.remove('active');
     });
     var currentItem = document.querySelector('[data-article-id="' + articleId + '"]');
     if (currentItem) {
         currentItem.classList.add('active');
+        currentItem.scrollIntoView({block: 'center'});
+        console.log('DEBUG: 高亮文章', articleId, '成功');
+    } else {
+        console.log('DEBUG: 未找到文章', articleId, '的DOM元素');
     }
+    
+    // 加载文章内容
     fetch('/article/' + articleId + '/content')
-        .then(function(response) { return response.json(); })
+        .then(function(response) {
+            if (!response.ok) {
+                throw new Error('文章不存在');
+            }
+            return response.json();
+        })
         .then(function(data) {
+            console.log('DEBUG: 成功加载文章', articleId, '内容');
             var contentArea = document.getElementById('article-content');
             contentArea.innerHTML =
                 '<div class="card">' +
@@ -96,7 +138,7 @@ function loadArticle(articleId) {
                 '<div class="article-actions-top">' +
                     '<a href="/article/' + articleId + '/edit" class="action-link edit">✏️ 编辑</a>' +
                     '<span class="action-separator">|</span>' +
-                    '<a href="#" onclick="deleteArticle(' + articleId + ')" class="action-link delete">🗑️ 删除</a>' +
+                    '<a href="#" onclick="showDeleteConfirm(' + articleId + '); return false;" class="action-link delete">🗑️ 删除</a>' +
                 '</div>' : '') +
                 '<h1>' + data.title + '</h1>' +
                 '<div class="article-content">' + data.content + '</div>' +
@@ -104,35 +146,80 @@ function loadArticle(articleId) {
                 '</div>';
         })
         .catch(function(error) {
-            var contentArea = document.getElementById('article-content');
-            contentArea.innerHTML =
-                '<div class="empty-state">' +
-                    '<h3>❌ 加载失败</h3>' +
-                    '<p>无法加载文章内容，请稍后重试</p>' +
-                '</div>';
+            console.error('DEBUG: 加载文章失败:', error);
+            // 如果文章不存在，尝试加载第一篇文章
+            var firstItem = document.querySelector('.article-item');
+            if (firstItem && firstItem.getAttribute('data-article-id') !== articleId.toString()) {
+                console.log('DEBUG: 尝试加载第一篇文章作为备选');
+                var firstId = firstItem.getAttribute('data-article-id');
+                loadArticle(firstId);
+            } else {
+                showEmptyState();
+            }
         });
-    localStorage.setItem('currentArticleId', articleId);
 }
 
-window.addEventListener('DOMContentLoaded', function() {
-    var currentId = localStorage.getItem('currentArticleId');
-    var item = null;
-    if (currentId) {
-        item = document.querySelector('.article-item[data-article-id="' + currentId + '"]');
-    }
-    if (item) {
-        item.classList.add('active');
-        loadArticle(currentId);
-        item.scrollIntoView({block: 'center'});
-    } else {
-        // SSR 已渲染第一篇，无需自动 loadArticle
-        var firstItem = document.querySelector('.article-item');
-        if (firstItem) {
-            firstItem.classList.add('active');
-            firstItem.scrollIntoView({block: 'center'});
+// 页面初始化
+function initializePage() {
+    var params = new URLSearchParams(window.location.search);
+    var highlightId = params.get('highlight_id');
+    
+    console.log('DEBUG: initializePage called');
+    console.log('DEBUG: URL =', window.location.href);
+    console.log('DEBUG: highlightId =', highlightId);
+    
+    // 如果有highlight_id参数，优先加载指定文章
+    if (highlightId) {
+        console.log('DEBUG: 尝试加载指定文章', highlightId);
+        var targetItem = document.querySelector('[data-article-id="' + highlightId + '"]');
+        if (targetItem) {
+            console.log('DEBUG: 找到指定文章元素，加载文章', highlightId);
+            loadArticle(highlightId);
+            return;
+        } else {
+            console.log('DEBUG: 未找到指定文章', highlightId, '的元素，fallback到分组第一篇');
         }
     }
-});
+    
+    // 如果没有highlight_id，检查是否有分组页码参数
+    var groupFirstArticle = null;
+    for (var key of params.keys()) {
+        if (key.startsWith('page_')) {
+            var groupName = key.substring(5); // 移除 'page_' 前缀
+            console.log('DEBUG: 检测到分组参数:', key, '分组名:', groupName);
+            
+            // 查找该分组的第一篇文章
+            var groupList = document.getElementById('group-list-' + groupName);
+            if (groupList) {
+                var firstItemInGroup = groupList.querySelector('.article-item');
+                if (firstItemInGroup) {
+                    groupFirstArticle = firstItemInGroup;
+                    console.log('DEBUG: 找到分组', groupName, '的第一篇文章:', firstItemInGroup.getAttribute('data-article-id'));
+                    break;
+                }
+            }
+        }
+    }
+    
+    // 如果找到了分组的第一篇文章，加载它
+    if (groupFirstArticle) {
+        var groupFirstId = groupFirstArticle.getAttribute('data-article-id');
+        console.log('DEBUG: 加载分组第一篇文章', groupFirstId);
+        loadArticle(groupFirstId);
+        return;
+    }
+    
+    // 否则加载全局第一篇文章
+    var firstItem = document.querySelector('.article-item');
+    if (firstItem) {
+        var firstId = firstItem.getAttribute('data-article-id');
+        console.log('DEBUG: 加载全局第一篇文章', firstId);
+        loadArticle(firstId);
+    } else {
+        console.log('DEBUG: 没有文章，显示空状态');
+        showEmptyState();
+    }
+}
 
 // 折叠/展开分组
 function toggleGroup(category) {
@@ -140,22 +227,108 @@ function toggleGroup(category) {
     var arrow = document.getElementById('arrow-' + category);
     if (content.style.display === 'none') {
         content.style.display = '';
-        if (arrow) arrow.innerHTML = "&or;"; // 展开时“∨”
+        if (arrow) arrow.innerHTML = "&or;"; // 展开时"∨"
     } else {
         content.style.display = 'none';
-        if (arrow) arrow.innerHTML = "&gt;"; // 收起时“>”
+        if (arrow) arrow.innerHTML = "&gt;"; // 收起时">"
     }
 }
 
-// 首页logo点击时清除localStorage并刷新
-(function() {
+// 简单的删除确认弹窗
+function showDeleteConfirm(articleId) {
+    console.log('DEBUG: showDeleteConfirm called for article', articleId);
+    
+    // 移除旧弹窗
+    var oldModal = document.getElementById('delete-modal');
+    if (oldModal) oldModal.remove();
+    
+    // 创建新弹窗
+    var modal = document.createElement('div');
+    modal.id = 'delete-modal';
+    modal.style.cssText = `
+        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.5); z-index: 2000;
+        display: flex; align-items: center; justify-content: center;
+    `;
+    
+    var dialog = document.createElement('div');
+    dialog.style.cssText = `
+        background: white; border-radius: 12px; padding: 2rem;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        text-align: center; min-width: 300px;
+    `;
+    
+    dialog.innerHTML = `
+        <div style="font-size: 1.2rem; margin-bottom: 1rem; color: #d32f2f;">
+            ⚠️ 确认删除
+        </div>
+        <div style="margin-bottom: 1.5rem; color: #333;">
+            确定要删除这篇文章吗？此操作不可恢复。
+        </div>
+        <div>
+            <button onclick="document.getElementById('delete-modal').remove()" 
+                    style="padding: 0.5rem 1.5rem; margin-right: 1rem; border: 1px solid #ccc; 
+                           background: white; border-radius: 6px; cursor: pointer;">
+                取消
+            </button>
+            <button onclick="deleteArticle(${articleId}); document.getElementById('delete-modal').remove()" 
+                    style="padding: 0.5rem 1.5rem; border: none; background: #f44336; 
+                           color: white; border-radius: 6px; cursor: pointer;">
+                删除
+            </button>
+        </div>
+    `;
+    
+    modal.appendChild(dialog);
+    document.body.appendChild(modal);
+    
+    // 点击遮罩关闭
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+}
+
+// 删除文章函数
+function deleteArticle(articleId) {
+    console.log('DEBUG: 删除文章', articleId);
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/article/' + articleId + '/delete';
+    form.style.display = 'none';
+    document.body.appendChild(form);
+    form.submit();
+}
+
+// 首页链接处理 - 移除干扰的跳转逻辑
+function handleHomeClick(e) {
+    // 不阻止默认行为，直接跳转
+    window.location.href = '/';
+}
+
+// 页面加载完成后初始化
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DEBUG: DOMContentLoaded fired');
+    
+    // 稍微延迟初始化，确保DOM完全准备好
+    setTimeout(function() {
+        initializePage();
+    }, 100);
+    
+    // 绑定首页链接 - 简化处理
     var homeLink = document.getElementById('home-link');
+    var navHomeLink = document.getElementById('nav-home-link');
+    
     if (homeLink) {
-        homeLink.addEventListener('click', function(e) {
-            localStorage.removeItem('currentArticleId');
-        });
+        homeLink.addEventListener('click', handleHomeClick);
     }
-})();
+    if (navHomeLink) {
+        navHomeLink.addEventListener('click', handleHomeClick);
+    }
+    
+
+});
 </script>
 <style>
 .collapsible {
@@ -205,5 +378,6 @@ function toggleGroup(category) {
     border-radius: 4px;
     color: #2d4f2d;
 }
+/* Modal styles now in style.css */
 </style>
 {% endblock %}

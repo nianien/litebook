@@ -37,8 +37,9 @@ def get_article(db: Session, article_id: int):
 def update_article(db: Session, article_id: int, article: schemas.ArticleUpdate):
     db_article = get_article(db, article_id)
     if db_article:
-        db_article.title = article.title
-        db_article.content = article.content
+        setattr(db_article, 'title', article.title)
+        setattr(db_article, 'content', article.content)
+        setattr(db_article, 'category', article.category)
         db.commit()
         db.refresh(db_article)
     return db_article

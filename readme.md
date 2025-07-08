@@ -76,7 +76,7 @@ gcloud run deploy liteblog \
   --allow-unauthenticated
 ```
 
-# 本地测试
+# 本地docker启动
 ```shell
 # 构建镜像
 docker build -t liteblog:latest .
@@ -87,4 +87,9 @@ docker run -d --name liteblog_app -p 8000:8080 --env-file .env liteblog:latest
 
 # 查看日志
 docker logs --tail 50 liteblog_app
+```
+
+# 本地服务器启动
+```shell
+GOOGLE_APPLICATION_CREDENTIALS="/Users/skyfalling/Workspace/cloud/liteblog/credentials.json" uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```

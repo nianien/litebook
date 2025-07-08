@@ -5,7 +5,7 @@
     <div class="article-actions-top">
         <a href="/article/{{ article.id }}/edit" class="action-link edit">✏️ 编辑</a>
         <span class="action-separator">|</span>
-        <a href="#" onclick="deleteArticle({{ article.id }})" class="action-link delete">🗑️ 删除</a>
+        <a href="#" onclick="showDeleteConfirm({{ article.id }})" class="action-link delete">🗑️ 删除</a>
     </div>
     {% endif %}
     
@@ -21,24 +21,6 @@
 </div>
 
 <script>
-function deleteArticle(articleId) {
-    if (confirm('确定要删除这篇文章吗？')) {
-        fetch(`/article/${articleId}/delete`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        }).then(response => {
-            if (response.ok) {
-                window.location.href = '/';
-            } else {
-                alert('删除失败，请重试');
-            }
-        }).catch(error => {
-            console.error('Error:', error);
-            alert('删除失败，请重试');
-        });
-    }
-}
+// 模态框功能已在 modal.js 中定义
 </script>
 {% endblock %}

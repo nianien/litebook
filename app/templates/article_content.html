@@ -4,7 +4,7 @@
     <div class="article-actions-top">
         <a href="/article/{{ article.id }}/edit" class="action-link edit">✏️ 编辑</a>
         <span class="action-separator">|</span>
-        <a href="#" onclick="deleteArticle({{ article.id }})" class="action-link delete">🗑️ 删除</a>
+        <a href="#" onclick="showDeleteConfirm({{ article.id }})" class="action-link delete">🗑️ 删除</a>
     </div>
     {% endif %}
     <h1>{{ article.title }}</h1>
@@ -12,4 +12,8 @@
     <div class="article-meta right">
         {{ article.author.username if article.author else '匿名' }} • {{ article.created_at.strftime('%Y-%m-%d %H:%M') if article.created_at else '' }}
     </div>
-</div> 
+</div>
+
+<script>
+// 模态框功能已在 modal.js 中定义
+</script> 
