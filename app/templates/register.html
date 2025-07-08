@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+    <h1>📝 用户注册</h1>
+    
+    <form method="post">
+        <div class="form-group">
+            <label for="username">用户名:</label>
+            <input type="text" id="username" name="username" class="form-control" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="password">密码:</label>
+            <input type="password" id="password" name="password" class="form-control" required>
+        </div>
+        
+        <button type="submit" class="btn btn-primary">注册</button>
+    </form>
+    
+    <p style="margin-top: 1rem;">
+        已有账号？ <a href="/login" style="color: #667eea;">立即登录</a>
+    </p>
+</div>
+{% endblock %}

@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+    <h1>✍️ 发布新文章</h1>
+    
+    <form method="post" id="articleForm">
+        <div class="form-group">
+            <label for="title">文章标题:</label>
+            <input type="text" id="title" name="title" class="form-control" required>
+        </div>
+        <div class="form-group">
+            <label for="category">题材:</label>
+            <input type="text" id="category" name="category" class="form-control" placeholder="请输入题材" required>
+        </div>
+        <div class="form-group">
+            <label for="content">文章内容:</label>
+            <div id="editor-container">
+                <div id="editor"></div>
+            </div>
+            <textarea id="content" name="content" style="display: none;"></textarea>
+        </div>
+        <button type="submit" class="action-link publish">📝 发布文章</button>
+    </form>
+</div>
+
+<!-- Quill.js CDN -->
+<link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
+<script src="https://cdn.quilljs.com/1.3.6/quill.min.js"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize Quill editor
+    var quill = new Quill('#editor', {
+        theme: 'snow',
+        modules: {
+            toolbar: [
+                [{ 'header': [1, 2, 3, false] }],
+                ['bold', 'italic', 'underline', 'strike'],
+                [{ 'color': [] }, { 'background': [] }],
+                [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                [{ 'align': [] }],
+                ['link', 'image', 'blockquote', 'code-block'],
+                ['clean']
+            ]
+        },
+        placeholder: '开始写作你的文章...',
+        bounds: '#editor'
+    });
+
+    // Sync Quill content with hidden textarea before form submission
+    document.getElementById('articleForm').addEventListener('submit', function() {
+        var content = quill.root.innerHTML;
+        document.getElementById('content').value = content;
+    });
+});
+</script>
+
+<style>
+#editor-container {
+    margin-bottom: 1rem;
+}
+
+#editor {
+    min-height: 300px;
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+}
+
+.ql-editor {
+    min-height: 280px;
+    padding: 1rem;
+}
+
+.ql-toolbar {
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    background: rgba(255, 255, 255, 0.95);
+    border-bottom: 1px solid #ddd;
+}
+
+.ql-container {
+    border-bottom-left-radius: 8px;
+    border-bottom-right-radius: 8px;
+}
+
+.ql-editor h1, .ql-editor h2, .ql-editor h3 {
+    color: #2d5a2d;
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.ql-editor p {
+    margin-bottom: 1rem;
+}
+
+.ql-editor blockquote {
+    border-left: 4px solid #4a7c59;
+    padding-left: 1rem;
+    margin: 1rem 0;
+    font-style: italic;
+    color: #555;
+}
+
+.ql-editor code {
+    background: rgba(74, 124, 89, 0.1);
+    padding: 0.2rem 0.4rem;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+}
+
+.ql-editor pre {
+    background: rgba(74, 124, 89, 0.05);
+    padding: 1rem;
+    border-radius: 5px;
+    overflow-x: auto;
+}
+
+.ql-editor a {
+    color: #4a7c59;
+    text-decoration: underline;
+}
+
+.ql-editor a:hover {
+    color: #2d5a2d;
+}
+
+.ql-editor img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 5px;
+    margin: 1rem 0;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    #editor {
+        min-height: 250px;
+    }
+    
+    .ql-editor {
+        min-height: 230px;
+        padding: 0.75rem;
+    }
+    
+    .ql-toolbar {
+        padding: 0.5rem;
+    }
+}
+</style>
+{% endblock %}

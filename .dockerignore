@@ -1,0 +1,32 @@
+# 忽略 Python 字节码缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 忽略虚拟环境
+.venv/
+venv/
+ENV/
+
+# 忽略 IDE 配置
+.idea/
+.vscode/
+*.iml
+
+# 忽略测试、日志和临时文件
+test/
+*.log
+*.tmp
+*.swp
+.DS_Store
+
+# 忽略构建脚本和缓存
+build.sh
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# 保留 blog.db，不要排除
+!blog.db 

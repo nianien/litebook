@@ -1,0 +1,35 @@
+# Python bytecode cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE settings
+.idea/
+.vscode/
+*.iml
+
+# Test, log, and temp files
+test/
+*.log
+*.tmp
+*.swp
+.DS_Store
+
+# Build scripts and cache
+build.sh
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# SQLite history
+sqlite_history
+
+# 保留 blog.db，不要排除
+!blog.db 

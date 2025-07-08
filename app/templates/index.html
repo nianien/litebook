@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="layout-split">
+    <!-- 左侧文章列表 -->
+    <div class="sidebar">
+        <h2>📚 文章列表</h2>
+        {% if grouped_data %}
+            {% for group in grouped_data %}
+            {% set cat_id = group.category|replace(' ', '_')|replace('（', '_')|replace('）', '_')|replace('(', '_')|replace(')', '_')|replace('/', '_')|replace('\\', '_') %}
+            <div class="article-group">
+                <div class="article-group-title collapsible" onclick="toggleGroup('{{ cat_id }}')" id="group-title-{{ cat_id }}">
+                    <span class="collapse-arrow" id="arrow-{{ cat_id }}">&gt;</span> {{ group.category }}<span class="group-count">（{{ group.total_articles }}）</span>
+                </div>
+                <div class="group-content" id="group-content-{{ cat_id }}">
+                    <ul class="article-list" id="group-list-{{ cat_id }}">
+                        {% for article in group.articles %}
+                        <li class="article-item" data-article-id="{{ article.id }}" onclick="loadArticle({{ article.id }})">
+                            <div class="article-title">{{ article.title }}</div>
+                            <div class="article-meta">
+                                <span class="article-author">{{ article.author.username }}</span>
+                                <span class="article-date">{{ article.created_at.strftime('%Y-%m-%d') }}</span>
+                            </div>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    <div class="pagination-controls">
+                        {# --- Pagination: << < x > >>, with special cases for x=1 and x=n --- #}
+                        {% set n = group.total_pages %}
+                        {% set x = group.current_page %}
+                        {% set cat = cat_id %}
+                        {% if n > 1 %}
+                            {% if x == 1 %}
+                                <span class="page-link active">1</span>
+                                {% if n > 1 %}
+                                    <a class="page-link" href="/?page_{{ cat }}={{ x+1 }}#group-{{ cat }}">&gt;</a>
+                                    <a class="page-link" href="/?page_{{ cat }}={{ n }}#group-{{ cat }}">&gt;&gt;</a>
+                                {% endif %}
+                            {% elif x == n %}
+                                <a class="page-link" href="/?page_{{ cat }}=1#group-{{ cat }}">&lt;&lt;</a>
+                                <a class="page-link" href="/?page_{{ cat }}={{ x-1 }}#group-{{ cat }}">&lt;</a>
+                                <span class="page-link active">{{ n }}</span>
+                            {% else %}
+                                <a class="page-link" href="/?page_{{ cat }}=1#group-{{ cat }}">&lt;&lt;</a>
+                                <a class="page-link" href="/?page_{{ cat }}={{ x-1 }}#group-{{ cat }}">&lt;</a>
+                                <span class="page-link active">{{ x }}</span>
+                                <a class="page-link" href="/?page_{{ cat }}={{ x+1 }}#group-{{ cat }}">&gt;</a>
+                                <a class="page-link" href="/?page_{{ cat }}={{ n }}#group-{{ cat }}">&gt;&gt;</a>
+                            {% endif %}
+                        {% else %}
+                            <span class="page-link active">1</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="empty-state">暂无文章</div>
+        {% endif %}
+    </div>
+    
+    <!-- 右侧文章内容 -->
+    <div class="content-area" id="article-content">
+        <div class="empty-state">
+            <h3>📖 选择文章</h3>
+            <p>从左侧列表中选择一篇文章来阅读</p>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 文章点击加载与高亮，并记录到localStorage
+function loadArticle(articleId) {
+    document.querySelectorAll('.article-item').forEach(item => {
+        item.classList.remove('active');
+    });
+    const currentItem = document.querySelector(`[data-article-id="${articleId}"]`);
+    if (currentItem) {
+        currentItem.classList.add('active');
+    }
+    fetch(`/article/${articleId}/content`)
+        .then(response => response.json())
+        .then(data => {
+            const contentArea = document.getElementById('article-content');
+            contentArea.innerHTML =
+                (data.can_edit ?
+                '<div class="article-actions-top">' +
+                    '<a href="/article/' + articleId + '/edit" class="action-link edit">✏️ 编辑</a>' +
+                    '<span class="action-separator">|</span>' +
+                    '<a href="#" onclick="deleteArticle(' + articleId + ')" class="action-link delete">🗑️ 删除</a>' +
+                '</div>' : '') +
+                '<h1>' + data.title + '</h1>' +
+                '<div class="article-content">' +
+                    data.content +
+                '</div>' +
+                '<div class="article-meta right">' +
+                    data.author + ' • ' + data.created_at +
+                '</div>';
+        })
+        .catch(error => {
+            console.error('Error loading article:', error);
+            document.getElementById('article-content').innerHTML =
+                '<div class="empty-state">' +
+                    '<h3>❌ 加载失败</h3>' +
+                    '<p>无法加载文章内容，请稍后重试</p>' +
+                '</div>';
+        });
+    localStorage.setItem('currentArticleId', articleId);
+}
+
+window.addEventListener('DOMContentLoaded', function() {
+    var currentId = localStorage.getItem('currentArticleId');
+    var item = null;
+    if (currentId) {
+        item = document.querySelector('.article-item[data-article-id="' + currentId + '"]');
+    }
+    if (item) {
+        item.classList.add('active');
+        loadArticle(currentId);
+        item.scrollIntoView({block: 'center'});
+    } else {
+        // 没有currentId或当前页没有该ID，自动加载当前页第一篇
+        var firstItem = document.querySelector('.article-item');
+        if (firstItem) {
+            var firstId = firstItem.getAttribute('data-article-id');
+            firstItem.classList.add('active');
+            loadArticle(firstId);
+            firstItem.scrollIntoView({block: 'center'});
+        }
+    }
+});
+
+// 折叠/展开分组
+function toggleGroup(category) {
+    var content = document.getElementById('group-content-' + category);
+    var arrow = document.getElementById('arrow-' + category);
+    if (content.style.display === 'none') {
+        content.style.display = '';
+        if (arrow) arrow.innerHTML = "&or;"; // 展开时“∨”
+    } else {
+        content.style.display = 'none';
+        if (arrow) arrow.innerHTML = "&gt;"; // 收起时“>”
+    }
+}
+
+// 首页logo点击时清除localStorage并刷新
+(function() {
+    var homeLink = document.getElementById('home-link');
+    if (homeLink) {
+        homeLink.addEventListener('click', function(e) {
+            localStorage.removeItem('currentArticleId');
+        });
+    }
+})();
+</script>
+<style>
+.collapsible {
+    cursor: pointer;
+    user-select: none;
+    font-weight: 400;
+    font-size: 1.02em;
+    color: #6a7c6a;
+    padding: 2px 0 2px 2px;
+    display: flex;
+    align-items: center;
+    transition: color 0.18s;
+    border-radius: 4px;
+}
+.collapsible:hover {
+    color: #3d4f3d;
+    background: #f6faf6;
+}
+.collapse-arrow {
+    display: inline-block;
+    width: 0.9em;
+    text-align: center;
+    margin-right: 6px;
+    font-size: 0.95em;
+    color: #b2bdb2;
+    font-weight: 300;
+    transition: transform 0.2s, color 0.18s;
+}
+.article-group {
+    margin-bottom: 0.7em;
+    border: none;
+    background: none;
+}
+.article-list {
+    margin-left: 0.5em;
+    padding-left: 0.5em;
+    border-left: none;
+}
+.group-count {
+    font-size: 0.98em;
+    color: #b2bdb2;
+    margin-left: 0.3em;
+    font-weight: 400;
+}
+.article-item.active {
+    background: #eafbe6;
+    border-radius: 4px;
+    color: #2d4f2d;
+}
+</style>
+{% endblock %}

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{% block title %}我的博客{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}?v=60.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+    <header>
+        <nav>
+            <a href="/" class="logo" id="home-link">📝 我的博客</a>
+            <ul class="nav-links">
+                <li><a href="/">首页</a></li>
+                {% if user %}
+                    <li><a href="/new">写文章</a></li>
+                    <li><a href="/history">浏览历史</a></li>
+                    <li><a href="/logout">退出</a></li>
+                {% else %}
+                    <li><a href="/login">登录</a></li>
+                    <li><a href="/register">注册</a></li>
+                {% endif %}
+            </ul>
+        </nav>
+    </header>
+    
+    <main>
+        <div class="container">
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+    
+    <footer>
+        <div class="footer-content">
+            <div class="footer-links">
+                <a href="/">首页</a> | 
+                <a href="/login">登录</a> | 
+                <a href="/register">注册</a> | 
+                <a href="/new">写文章</a> | 
+                <span class="contact">📧 toyzoemei@gmail.com</span>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <p>&copy; 2024 我的博客 | 使用 FastAPI 和 Python 构建</p>
+        </div>
+    </footer>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

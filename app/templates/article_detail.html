@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="layout-split">
+    <!-- 左侧文章列表 -->
+    <div class="sidebar">
+        <h2>📚 文章列表</h2>
+        
+        {% if articles %}
+            <ul class="article-list">
+                {% for article_item in articles %}
+                <li class="article-item" data-article-id="{{ article_item.id }}" onclick="loadArticle({{ article_item.id }})">
+                    <div class="article-title">{{ article_item.title }}</div>
+                    <div class="article-meta">
+                        {{ article_item.author.username if article_item.author else '匿名' }} • {{ article_item.created_at.strftime('%Y-%m-%d %H:%M') if article_item.created_at else '' }}
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <div class="empty-state">
+                <h3>📝 还没有文章</h3>
+                <p>成为第一个发布文章的人吧！</p>
+                {% if user %}
+                    <a href="/new" class="btn btn-primary">写第一篇文章</a>
+                {% else %}
+                    <a href="/login" class="btn btn-primary">登录后写文章</a>
+                {% endif %}
+            </div>
+        {% endif %}
+    </div>
+    
+    <!-- 右侧文章内容 -->
+    <div class="content-area" id="article-content">
+        <div class="card">
+            {% if user and article.author and user.id == article.author.id %}
+            <div class="article-actions-top">
+                <a href="/article/{{ article.id }}/edit" class="action-link edit">✏️ 编辑</a>
+                <span class="action-separator">|</span>
+                <a href="#" onclick="deleteArticle({{ article.id }})" class="action-link delete">🗑️ 删除</a>
+            </div>
+            {% endif %}
+            
+            <h1>{{ article.title }}</h1>
+            
+            <div class="article-content">
+                {{ article.content }}
+            </div>
+            
+            <div class="article-meta right">
+                {{ article.author.username if article.author else '匿名' }} • {{ article.created_at.strftime('%Y-%m-%d %H:%M') if article.created_at else '' }}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// 设置当前文章为激活状态
+document.addEventListener('DOMContentLoaded', function() {
+    const currentArticleId = {{ article.id }};
+    const currentItem = document.querySelector(`[data-article-id="${currentArticleId}"]`);
+    if (currentItem) {
+        currentItem.classList.add('active');
+    }
+});
+
+function loadArticle(articleId) {
+    // 移除所有active类
+    document.querySelectorAll('.article-item').forEach(item => {
+        item.classList.remove('active');
+    });
+    
+    // 添加active类到当前选中的文章
+    const currentItem = document.querySelector(`[data-article-id="${articleId}"]`);
+    if (currentItem) {
+        currentItem.classList.add('active');
+    }
+    
+    // 更新URL，但不刷新页面
+    window.history.pushState({}, '', `/article/${articleId}`);
+    
+    // 加载文章内容
+    fetch(`/article/${articleId}/content`)
+        .then(response => response.json())
+        .then(data => {
+            const contentArea = document.getElementById('article-content');
+            contentArea.innerHTML = `
+                ${data.can_edit ? `
+                <div class="article-actions-top">
+                    <a href="/article/${articleId}/edit" class="action-link edit">✏️ 编辑</a>
+                    <span class="action-separator">|</span>
+                    <a href="#" onclick="deleteArticle(${articleId})" class="action-link delete">🗑️ 删除</a>
+                </div>
+                ` : ''}
+                <h1>${data.title}</h1>
+                <div class="article-content">
+                    ${data.content}
+                </div>
+                <div class="article-meta right">
+                    ${data.author} • ${data.created_at}
+                </div>
+            `;
+        })
+        .catch(error => {
+            console.error('Error loading article:', error);
+            document.getElementById('article-content').innerHTML = `
+                <div class="empty-state">
+                    <h3>❌ 加载失败</h3>
+                    <p>无法加载文章内容，请稍后重试</p>
+                </div>
+            `;
+        });
+}
+
+function deleteArticle(articleId) {
+    if (confirm('确定要删除这篇文章吗？')) {
+        fetch(`/article/${articleId}/delete`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        }).then(response => {
+            if (response.ok) {
+                window.location.href = '/';
+            } else {
+                alert('删除失败，请重试');
+            }
+        }).catch(error => {
+            console.error('Error:', error);
+            alert('删除失败，请重试');
+        });
+    }
+}
+</script>
+{% endblock %} 
