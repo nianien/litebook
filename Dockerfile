@@ -24,11 +24,8 @@ COPY . .
 USER appuser
 
 # Cloud Run 要求监听 0.0.0.0:8080，入口为 app.main:app
-# 启动时自动加载 .env 环境变量（适用于 shell 启动方式）
-# 假设原 CMD 是：CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
-# 改为 shell 方式：
-ENTRYPOINT ["/bin/sh", "-c"]
-CMD ["if [ -f .env ]; then export $(grep -v '^#' .env | xargs); fi; exec uvicorn app.main:app --host 0.0.0.0 --port 8080"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers", "--forwarded-allow-ips=*"]
 
 # 可选：健康检查端点（Cloud Run 可自动检测 /）
-# HEALTHCHECK CMD curl --fail http://localhost:8080/ || exit 1
+#HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+#  CMD curl --fail http://localhost:8080/ || exit 1
