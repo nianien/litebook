@@ -34,4 +34,4 @@ sqlite_history
 # 保留 blog.db，不要排除
 !blog.db 
 .env
-credentials.jsoncredentials.json
+credentials.json
