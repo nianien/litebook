@@ -35,3 +35,4 @@ sqlite_history
 !blog.db 
 .env
 credentials.json
+/cookies.txt
