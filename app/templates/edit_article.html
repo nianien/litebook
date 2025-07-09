@@ -39,8 +39,8 @@
         </div>
         
         <div class="article-actions">
-            <a href="#" onclick="document.getElementById('articleForm').submit(); return false;" class="action-link edit">💾 保存</a>
-            <a href="/article/{{ article.id }}" class="action-link delete">❌ 取消</a>
+            <button type="submit" class="action-link edit">💾 保存</button>
+            <a href="/?highlight_id={{ article.id }}" class="action-link delete">❌ 取消</a>
         </div>
     </form>
 </div>
@@ -76,9 +76,18 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Sync Quill content with hidden textarea before form submission
-    document.getElementById('articleForm').addEventListener('submit', function() {
-        var content = quill.root.innerHTML;
+    document.getElementById('articleForm').addEventListener('submit', function(e) {
+        // Prevent default submission
+        e.preventDefault();
+        
+        // Get content as text, preserving line breaks but removing HTML tags
+        var content = quill.getText();
         document.getElementById('content').value = content;
+        
+        // Force a small delay to ensure content is set, then submit
+        setTimeout(function() {
+            document.getElementById('articleForm').submit();
+        }, 100);
     });
 });
 </script>

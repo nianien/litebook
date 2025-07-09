@@ -28,31 +28,24 @@ def group_articles_by_category(articles):
         groups[key].append(article)
     return sorted(groups.items())
 
-@app.get("/", response_class=HTMLResponse)
-def index(request: Request, db: Session = Depends(deps.get_db)):
-    per_page = 10
+# 工具函数：分类名转cat_id
+def to_cat_id(category: str) -> str:
+    return category.replace(' ', '_').replace('（', '_').replace('）', '_').replace('(', '_').replace(')', '_').replace('/', '_').replace('\\', '_')
+
+# 工具函数：用户对象转dict
+def serialize_user(user):
+    if user:
+        return {"id": user.id, "username": user.username}
+    return None
+
+# 工具函数：分页分组
+def get_grouped_data(db, request, per_page=10):
     categories = [row[0] for row in db.query(models.Article.category).distinct().all()]
     grouped_data = []
-    first_article = None
-    
-    # 检查是否有highlight_id参数
-    highlight_id = request.query_params.get('highlight_id')
-    highlight_article = None
-    if highlight_id:
-        try:
-            highlight_article = crud.get_article(db, int(highlight_id))
-            if highlight_article:
-                first_article = highlight_article
-        except (ValueError, TypeError):
-            pass
-    
     for category in categories:
-        cat_id = category.replace(' ', '_').replace('（', '_').replace('）', '_').replace('(', '_').replace(')', '_').replace('/', '_').replace('\\', '_')
+        cat_id = to_cat_id(category)
         page_param = f"page_{cat_id}"
         current_page = int(request.query_params.get(page_param, 1))
-        
-
-        
         skip = (current_page - 1) * per_page
         articles = crud.get_articles_by_category(db, category, skip=skip, limit=per_page)
         total_articles = crud.get_articles_count_by_category(db, category)
@@ -70,17 +63,29 @@ def index(request: Request, db: Session = Depends(deps.get_db)):
             "start_page": start_page,
             "end_page": end_page,
         })
-        # 如果没有highlight_id指定的文章，使用第一个分组的第一篇
-        if not first_article and articles:
-            first_article = articles[0]
+    return grouped_data
+
+@app.get("/", response_class=HTMLResponse)
+def index(request: Request, db: Session = Depends(deps.get_db)):
+    per_page = 10
+    grouped_data = get_grouped_data(db, request, per_page)
+    first_article = None
+    highlight_id = request.query_params.get('highlight_id')
+    if highlight_id:
+        try:
+            highlight_article = crud.get_article(db, int(highlight_id))
+            if highlight_article:
+                first_article = highlight_article
+        except (ValueError, TypeError):
+            pass
+    if not first_article:
+        for group in grouped_data:
+            if group["articles"]:
+                first_article = group["articles"][0]
+                break
     user = get_current_user_from_cookie(request, db)
-    # 将用户对象转换为可序列化的字典
-    user_dict = None
-    if user:
-        user_dict = {
-            "id": user.id,
-            "username": user.username
-        }
+    user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
+    user_dict = serialize_user(user)
     response = templates.TemplateResponse("index.html", {
         "request": request,
         "user": user_dict,
@@ -137,38 +142,16 @@ def read_article(request: Request, article_id: int, db: Session = Depends(deps.g
         return RedirectResponse("/", status_code=302)
     
     user = get_current_user_from_cookie(request, db)
-    if user:
-        crud.add_view_record(db, int(user.id), article_id)
+    user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
+    if user_id:
+        crud.add_view_record(db, user_id, int(article_id))
     
-    # 获取所有分组文章列表用于侧边栏
-    per_page = 10
-    categories = [row[0] for row in db.query(models.Article.category).distinct().all()]
-    grouped_data = []
-    for category in categories:
-        cat_id = category.replace(' ', '_').replace('（', '_').replace('）', '_').replace('(', '_').replace(')', '_').replace('/', '_').replace('\\', '_')
-        page_param = f"page_{cat_id}"
-        current_page = int(request.query_params.get(page_param, 1))
-        skip = (current_page - 1) * per_page
-        articles = crud.get_articles_by_category(db, category, skip=skip, limit=per_page)
-        total_articles = crud.get_articles_count_by_category(db, category)
-        total_pages = (total_articles + per_page - 1) // per_page
-        start_page = max(1, current_page - 2)
-        end_page = min(total_pages, current_page + 2)
-        page_numbers = list(range(start_page, end_page + 1))
-        grouped_data.append({
-            "category": category,
-            "articles": articles,
-            "current_page": current_page,
-            "total_pages": total_pages,
-            "total_articles": total_articles,
-            "page_numbers": page_numbers,
-            "start_page": start_page,
-            "end_page": end_page,
-        })
+    grouped_data = get_grouped_data(db, request)
+    user_dict = serialize_user(user)
     return templates.TemplateResponse("article_detail.html", {
         "request": request,
         "article": article,
-        "user": user,
+        "user": user_dict,
         "grouped_data": grouped_data,
         "first_article": article
     })
@@ -184,12 +167,14 @@ def edit_article_page(request: Request, article_id: int, db: Session = Depends(d
         return RedirectResponse("/", status_code=302)
     
     # 只有文章作者才能编辑
-    if user and hasattr(user, 'id') and article.author_id != int(user.id):
+    user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
+    if user_id is not None and int(article.author_id) != user_id:
         return RedirectResponse("/", status_code=302)
     
     # 查询所有分类
     categories = [row[0] for row in db.query(models.Article.category).distinct().all()]
-    return templates.TemplateResponse("edit_article.html", {"request": request, "article": article, "user": user, "categories": categories})
+    user_dict = serialize_user(user)
+    return templates.TemplateResponse("edit_article.html", {"request": request, "article": article, "user": user_dict, "categories": categories})
 
 @app.post("/article/{article_id}/edit")
 def edit_article(request: Request, article_id: int, title: str = Form(...), content: str = Form(...), category: str = Form("未分类"), db: Session = Depends(deps.get_db)):
@@ -200,7 +185,8 @@ def edit_article(request: Request, article_id: int, title: str = Form(...), cont
     if not article:
         return RedirectResponse("/", status_code=302)
     # 只有文章作者才能编辑
-    if user and hasattr(user, 'id') and article.author_id != user.id:
+    user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
+    if user_id is not None and int(article.author_id) != user_id:
         return RedirectResponse("/", status_code=302)
     crud.update_article(db, article_id, schemas.ArticleUpdate(title=title, content=content, category=category))
     # 跳转到首页并带上分组hash和文章id，自动高亮该分组该文章
@@ -208,15 +194,22 @@ def edit_article(request: Request, article_id: int, title: str = Form(...), cont
     return RedirectResponse(f"/?highlight_id={article_id}#group-{cat_id}", status_code=302)
 
 @app.get("/new", response_class=HTMLResponse)
-def new_article_page(request: Request):
-    return templates.TemplateResponse("new_article.html", {"request": request})
+def new_article_page(request: Request, db: Session = Depends(deps.get_db)):
+    categories = [row[0] for row in db.query(models.Article.category).distinct().all()]
+    return templates.TemplateResponse("new_article.html", {"request": request, "categories": categories})
 
 @app.post("/new")
 def new_article(request: Request, title: str = Form(...), content: str = Form(...), category: str = Form("未分类"), db: Session = Depends(deps.get_db)):
     user = get_current_user_from_cookie(request, db)
     if not user:
         return RedirectResponse("/login", status_code=302)
-    crud.create_article(db, int(user.id), schemas.ArticleCreate(title=title, content=content, category=category))
+    user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
+    if user_id:
+        # 创建文章并获取返回的文章对象
+        new_article_obj = crud.create_article(db, user_id, schemas.ArticleCreate(title=title, content=content, category=category))
+        # 跳转到首页并高亮显示新创建的文章
+        cat_id = to_cat_id(category)
+        return RedirectResponse(f"/?highlight_id={new_article_obj.id}#group-{cat_id}", status_code=302)
     return RedirectResponse("/", status_code=302)
 
 @app.get("/article/{article_id}/content")
@@ -226,7 +219,8 @@ def get_article_content(article_id: int, request: Request, db: Session = Depends
         raise HTTPException(status_code=404, detail="Article not found")
     
     user = get_current_user_from_cookie(request, db)
-    can_edit = user and article.author and user.id == article.author.id
+    user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
+    can_edit = user_id == int(article.author_id) if article.author else False
     
     return {
         "id": article.id,
@@ -243,7 +237,8 @@ def view_history(request: Request, db: Session = Depends(deps.get_db)):
     user = get_current_user_from_cookie(request, db)
     if not user:
         return RedirectResponse("/login", status_code=302)
-    records = crud.get_view_records(db, int(user.id))
+    user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
+    records = crud.get_view_records(db, user_id)
     # 分组历史记录中的文章
     from collections import defaultdict
     groups = defaultdict(list)
@@ -253,7 +248,7 @@ def view_history(request: Request, db: Session = Depends(deps.get_db)):
             groups[article.category or "未分类"].append(article)
     grouped_data = []
     for category, articles in groups.items():
-        cat_id = category.replace(' ', '_').replace('（', '_').replace('）', '_').replace('(', '_').replace(')', '_').replace('/', '_').replace('\\', '_')
+        cat_id = to_cat_id(category)
         grouped_data.append({
             "category": category,
             "articles": articles,
@@ -265,7 +260,8 @@ def view_history(request: Request, db: Session = Depends(deps.get_db)):
             "end_page": 1,
         })
     first_article = grouped_data[0]["articles"][0] if grouped_data and grouped_data[0]["articles"] else None
-    return templates.TemplateResponse("index.html", {"request": request, "grouped_data": grouped_data, "first_article": first_article, "user": user, "history": True})
+    user_dict = serialize_user(user)
+    return templates.TemplateResponse("index.html", {"request": request, "grouped_data": grouped_data, "first_article": first_article, "user": user_dict, "history": True})
 
 @app.post("/article/{article_id}/delete")
 def delete_article(article_id: int, request: Request, db: Session = Depends(deps.get_db)):
@@ -275,7 +271,8 @@ def delete_article(article_id: int, request: Request, db: Session = Depends(deps
     article = crud.get_article(db, article_id)
     if not article:
         return RedirectResponse("/", status_code=302)
-    if user and hasattr(user, 'id') and article.author_id != user.id:
+    user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
+    if user_id is not None and int(article.author_id) != user_id:
         return RedirectResponse("/", status_code=302)
     category = article.category or "未分类"
     cat_id = category.replace(' ', '_').replace('（', '_').replace('）', '_').replace('(', '_').replace(')', '_').replace('/', '_').replace('\\', '_')
@@ -389,7 +386,7 @@ def create_comment(
         anonymous_name=anonymous_name if not user else None
     )
     
-    user_id = user.id if user else None
+    user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
     comment = crud.create_comment(db, comment_data, user_id)
     
     response = JSONResponse(content={

@@ -5,21 +5,45 @@
     
     <form method="post" id="articleForm">
         <div class="form-group">
-            <label for="title">文章标题:</label>
+            <label for="title">标题</label>
             <input type="text" id="title" name="title" class="form-control" required>
         </div>
         <div class="form-group">
-            <label for="category">题材:</label>
-            <input type="text" id="category" name="category" class="form-control" placeholder="请输入题材" required>
+            <label for="category">分类</label>
+            <input type="text" id="category" name="category" class="form-control" placeholder="请输入分类" autocomplete="off" required list="category-list">
+            <datalist id="category-list">
+                {% for cat in categories %}
+                <option value="{{ cat }}">{{ cat }}</option>
+                {% endfor %}
+            </datalist>
+            <div id="category-tags" style="margin-top: 0.5rem;">
+                {% for cat in categories %}
+                    <span class="category-tag" style="display:inline-block; background:#e0f2f1; color:#00796b; border-radius:12px; padding:2px 12px; margin:2px; cursor:pointer; font-size:0.95em;">{{ cat }}</span>
+                {% endfor %}
+            </div>
         </div>
+        <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            var tags = document.querySelectorAll('#category-tags .category-tag');
+            var input = document.getElementById('category');
+            tags.forEach(function(tag) {
+                tag.addEventListener('click', function() {
+                    input.value = tag.textContent;
+                });
+            });
+        });
+        </script>
         <div class="form-group">
-            <label for="content">文章内容:</label>
+            <label for="content">内容</label>
             <div id="editor-container">
                 <div id="editor"></div>
             </div>
             <textarea id="content" name="content" style="display: none;"></textarea>
         </div>
-        <button type="submit" class="action-link publish">📝 发布文章</button>
+        <div class="article-actions">
+            <button type="submit" class="action-link edit">📝 发布</button>
+            <a href="#" onclick="cancelArticle()" class="action-link delete">❌ 取消</a>
+        </div>
     </form>
 </div>
 
@@ -46,13 +70,48 @@ document.addEventListener('DOMContentLoaded', function() {
         placeholder: '开始写作你的文章...',
         bounds: '#editor'
     });
-
+    // Set initial content from the textarea (empty for new)
+    var initialContent = document.getElementById('content').value;
+    if (initialContent) {
+        quill.root.innerHTML = initialContent;
+    }
     // Sync Quill content with hidden textarea before form submission
-    document.getElementById('articleForm').addEventListener('submit', function() {
-        var content = quill.root.innerHTML;
+    document.getElementById('articleForm').addEventListener('submit', function(e) {
+        // Prevent default submission
+        e.preventDefault();
+        
+        // Get content as text, preserving line breaks but removing HTML tags
+        var content = quill.getText();
         document.getElementById('content').value = content;
+        
+        // Force a small delay to ensure content is set, then submit
+        setTimeout(function() {
+            document.getElementById('articleForm').submit();
+        }, 100);
     });
 });
+</script>
+
+<script>
+// Cancel article function - defined in global scope
+function cancelArticle() {
+    // Get the referrer URL
+    var referrer = document.referrer;
+    
+    // Check if we have a referrer and it's from our site
+    if (referrer && (referrer.includes(window.location.hostname) || referrer.includes('localhost'))) {
+        // If referrer has highlight_id parameter, use it
+        if (referrer.includes('highlight_id=')) {
+            window.location.href = referrer;
+        } else {
+            // Otherwise go to homepage
+            window.location.href = '/';
+        }
+    } else {
+        // No referrer or external site, go to homepage
+        window.location.href = '/';
+    }
+}
 </script>
 
 <style>
@@ -149,6 +208,27 @@ document.addEventListener('DOMContentLoaded', function() {
     .ql-toolbar {
         padding: 0.5rem;
     }
+}
+
+.category-tags {
+    margin-top: 0.5rem;
+}
+.category-tag {
+    display: inline-block;
+    background: #f3f3f3;
+    color: #4a7c59;
+    border: 1px solid #e0e0e0;
+    border-radius: 12px;
+    padding: 0.2rem 0.8rem;
+    margin: 0 0.3rem 0.3rem 0;
+    font-size: 0.95em;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+}
+.category-tag:hover {
+    background: #e0f7e9;
+    color: #2d5a2d;
+    border-color: #b2dfdb;
 }
 </style>
 {% endblock %}
