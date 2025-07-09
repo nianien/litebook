@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Depends, Request, Form, status, HTTPException
-from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
@@ -9,11 +9,17 @@ from sqlalchemy import distinct
 import os
 from collections import defaultdict
 
-app = FastAPI()
+app = FastAPI(
+    title="LiteBlog",
+    description="A simple blog system",
+    version="1.0.0",
+    docs_url=None,
+    redoc_url=None
+)
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 
-models.Base.metadata.create_all(bind=deps.engine)
+# models.Base.metadata.create_all(bind=deps.engine)  # 表已存在，不需要创建
 
 def group_articles_by_category(articles):
     groups = defaultdict(list)
@@ -68,9 +74,16 @@ def index(request: Request, db: Session = Depends(deps.get_db)):
         if not first_article and articles:
             first_article = articles[0]
     user = get_current_user_from_cookie(request, db)
+    # 将用户对象转换为可序列化的字典
+    user_dict = None
+    if user:
+        user_dict = {
+            "id": user.id,
+            "username": user.username
+        }
     response = templates.TemplateResponse("index.html", {
         "request": request,
-        "user": user,
+        "user": user_dict,
         "grouped_data": grouped_data,
         "first_article": first_article,
     })
@@ -125,7 +138,7 @@ def read_article(request: Request, article_id: int, db: Session = Depends(deps.g
     
     user = get_current_user_from_cookie(request, db)
     if user:
-        crud.add_view_record(db, user.id, article_id)
+        crud.add_view_record(db, int(user.id), article_id)
     
     # 获取所有分组文章列表用于侧边栏
     per_page = 10
@@ -171,7 +184,7 @@ def edit_article_page(request: Request, article_id: int, db: Session = Depends(d
         return RedirectResponse("/", status_code=302)
     
     # 只有文章作者才能编辑
-    if user and hasattr(user, 'id') and article.author_id != user.id:
+    if user and hasattr(user, 'id') and article.author_id != int(user.id):
         return RedirectResponse("/", status_code=302)
     
     # 查询所有分类
@@ -203,7 +216,7 @@ def new_article(request: Request, title: str = Form(...), content: str = Form(..
     user = get_current_user_from_cookie(request, db)
     if not user:
         return RedirectResponse("/login", status_code=302)
-    crud.create_article(db, user.id, schemas.ArticleCreate(title=title, content=content, category=category))
+    crud.create_article(db, int(user.id), schemas.ArticleCreate(title=title, content=content, category=category))
     return RedirectResponse("/", status_code=302)
 
 @app.get("/article/{article_id}/content")
@@ -220,6 +233,7 @@ def get_article_content(article_id: int, request: Request, db: Session = Depends
         "title": article.title,
         "content": article.content,
         "author": article.author.username if article.author else "匿名",
+        "author_id": article.author_id,
         "created_at": article.created_at.strftime('%Y-%m-%d %H:%M') if article.created_at else "",
         "can_edit": can_edit
     }
@@ -318,3 +332,86 @@ def delete_article(article_id: int, request: Request, db: Session = Depends(deps
                 return RedirectResponse(f"/?highlight_id={first_article.id}#group-{encoded_first_cat_id}", status_code=302)
         else:
             return RedirectResponse("/", status_code=302)
+
+# 评论相关API
+@app.get("/api/comments/{article_id}")
+def get_comments(article_id: int, db: Session = Depends(deps.get_db)):
+    """获取文章的所有评论"""
+    comments = crud.get_comments_by_article(db, article_id)
+    result = []
+    for comment in comments:
+        # 获取回复（现在返回的是字典列表）
+        replies = crud.get_comment_replies(db, comment.id)
+        comment_data = {
+            "id": comment.id,
+            "content": comment.content,
+            "created_at": comment.created_at.strftime('%Y-%m-%d %H:%M'),
+            "user": {"id": comment.user.id, "username": comment.user.username} if comment.user else None,
+            "anonymous_name": comment.anonymous_name,
+            "parent_id": comment.parent_id,
+            "replies": replies  # 直接使用返回的字典列表
+        }
+        
+        result.append(comment_data)
+    
+    response = JSONResponse(content={"comments": result})
+    response.headers["Content-Type"] = "application/json; charset=utf-8"
+    return response
+
+@app.post("/api/comments")
+def create_comment(
+    request: Request,
+    content: str = Form(...),
+    article_id: int = Form(...),
+    parent_id: int = Form(None),
+    anonymous_name: str = Form(""),
+    db: Session = Depends(deps.get_db)
+):
+    """创建评论"""
+    user = get_current_user_from_cookie(request, db)
+    
+    # 验证文章存在
+    article = crud.get_article(db, article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+    
+    # 如果是回复，验证父评论存在
+    if parent_id:
+        parent_comment = crud.get_comment(db, parent_id)
+        if not parent_comment:
+            raise HTTPException(status_code=404, detail="Parent comment not found")
+    
+    # 创建评论
+    comment_data = schemas.CommentCreate(
+        content=content,
+        article_id=article_id,
+        parent_id=parent_id,
+        anonymous_name=anonymous_name if not user else None
+    )
+    
+    user_id = user.id if user else None
+    comment = crud.create_comment(db, comment_data, user_id)
+    
+    response = JSONResponse(content={
+        "id": comment.id,
+        "content": comment.content,
+        "created_at": comment.created_at.strftime('%Y-%m-%d %H:%M'),
+        "user": {"id": comment.user.id, "username": comment.user.username} if comment.user else None,
+        "anonymous_name": comment.anonymous_name,
+        "parent_id": comment.parent_id
+    })
+    response.headers["Content-Type"] = "application/json; charset=utf-8"
+    return response
+
+@app.delete("/api/comments/{comment_id}")
+def delete_comment(comment_id: int, request: Request, db: Session = Depends(deps.get_db)):
+    """删除评论 - 只有评论作者或文章作者可以删除"""
+    user = get_current_user_from_cookie(request, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    deleted_comment = crud.delete_comment(db, comment_id, user.id)
+    if not deleted_comment:
+        raise HTTPException(status_code=403, detail="Permission denied - only comment author or article author can delete comments")
+    
+    return {"message": "Comment deleted successfully"}

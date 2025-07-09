@@ -24,7 +24,8 @@ def getconn():
         "pymysql",
         user=DB_USER,
         password=DB_PASSWORD,
-        db=DB_NAME
+        db=DB_NAME,
+        charset='utf8mb4'
     )
 
 
@@ -33,6 +34,7 @@ engine = create_engine(
     creator=getconn,
     pool_pre_ping=True,
     pool_recycle=3600,
+    connect_args={"charset": "utf8mb4"}
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

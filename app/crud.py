@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from . import models, schemas
 from passlib.context import CryptContext
+from typing import Optional
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -66,3 +67,93 @@ def get_articles_by_category(db: Session, category: str, skip=0, limit=10):
 
 def get_articles_count_by_category(db: Session, category: str):
     return db.query(models.Article).filter(models.Article.category == category).count()
+
+# 评论相关CRUD操作
+def create_comment(db: Session, comment: schemas.CommentCreate, user_id: Optional[int] = None):
+    """创建评论，支持匿名和登录用户"""
+    comment_data = comment.dict()
+    if user_id:
+        comment_data['user_id'] = user_id
+        comment_data.pop('anonymous_name', None)  # 登录用户不需要匿名名称
+    else:
+        comment_data['user_id'] = None  # 确保匿名用户没有user_id
+    
+    db_comment = models.Comment(**comment_data)
+    db.add(db_comment)
+    db.commit()
+    db.refresh(db_comment)
+    return db_comment
+
+def get_comments_by_article(db: Session, article_id: int):
+    """获取文章的所有顶级评论（不包括回复）"""
+    return db.query(models.Comment).filter(
+        models.Comment.article_id == article_id,
+        models.Comment.parent_id.is_(None)
+    ).order_by(models.Comment.created_at.desc()).all()
+
+def get_comment_replies(db: Session, comment_id: int):
+    """获取评论的回复（包括嵌套回复）"""
+    def get_replies_recursive(parent_id):
+        replies = db.query(models.Comment).filter(
+            models.Comment.parent_id == parent_id
+        ).order_by(models.Comment.created_at.asc()).all()
+        
+        result = []
+        for reply in replies:
+            reply_data = {
+                "id": reply.id,
+                "content": reply.content,
+                "created_at": reply.created_at.strftime('%Y-%m-%d %H:%M'),
+                "user": {"id": reply.user.id, "username": reply.user.username} if reply.user else None,
+                "anonymous_name": reply.anonymous_name,
+                "parent_id": reply.parent_id,
+                "replies": get_replies_recursive(reply.id)  # 递归获取嵌套回复
+            }
+            result.append(reply_data)
+        
+        return result
+    
+    return get_replies_recursive(comment_id)
+
+def get_comment(db: Session, comment_id: int):
+    """获取单个评论"""
+    return db.query(models.Comment).filter(models.Comment.id == comment_id).first()
+
+def delete_comment(db: Session, comment_id: int, user_id: Optional[int] = None):
+    """删除评论，只有评论作者或文章作者可以删除，会级联删除所有子评论"""
+    db_comment = get_comment(db, comment_id)
+    if db_comment is None:
+        return None
+    
+    # 检查权限：只有评论作者或文章作者可以删除
+    can_delete = False
+    
+    # 检查是否是评论作者
+    if user_id is not None and db_comment.user_id == user_id:
+        can_delete = True
+    
+    # 检查是否是文章作者
+    if user_id is not None and db_comment.article and db_comment.article.author_id == user_id:
+        can_delete = True
+    
+    if can_delete:
+        # 递归删除所有子评论
+        def delete_replies_recursive(parent_id):
+            replies = db.query(models.Comment).filter(
+                models.Comment.parent_id == parent_id
+            ).all()
+            
+            for reply in replies:
+                # 先递归删除这个回复的子评论
+                delete_replies_recursive(reply.id)
+                # 然后删除这个回复
+                db.delete(reply)
+        
+        # 先删除所有子评论
+        delete_replies_recursive(comment_id)
+        # 然后删除主评论
+        db.delete(db_comment)
+        db.commit()
+        return db_comment
+    
+    return None

@@ -83,6 +83,8 @@
 <script>
 // 全局变量
 var currentArticleId = null;
+var currentUser = null; // 将在页面加载时设置
+var currentArticleAuthorId = null; // 当前文章的作者ID
 
 // 显示空白状态
 function showEmptyState() {
@@ -131,6 +133,9 @@ function loadArticle(articleId) {
         })
         .then(function(data) {
             console.log('DEBUG: 成功加载文章', articleId, '内容');
+            // 保存文章作者ID
+            currentArticleAuthorId = data.author_id;
+            
             var contentArea = document.getElementById('article-content');
             contentArea.innerHTML =
                 '<div class="card">' +
@@ -143,7 +148,27 @@ function loadArticle(articleId) {
                 '<h1>' + data.title + '</h1>' +
                 '<div class="article-content">' + data.content + '</div>' +
                 '<div class="article-meta right">' + data.author + ' • ' + data.created_at + '</div>' +
+                '</div>' +
+                '<div class="comments-section">' +
+                '<h3>💬 评论</h3>' +
+                '<div class="comment-form">' +
+                '<div class="form-group">' +
+                '<textarea id="comment-content" placeholder="写下你的评论..." rows="3"></textarea>' +
+                '</div>' +
+                '<div class="form-group">' +
+                '<button type="button" onclick="submitComment()" class="btn btn-primary">发表评论</button>' +
+                '</div>' +
+                '</div>' +
+                '<div class="comments-list" id="comments-list">' +
+                '<div class="loading">加载评论中...</div>' +
+                '</div>' +
                 '</div>';
+            
+            // 确保弹窗在body中
+            ensureModalExists();
+            
+            // 加载评论
+            loadComments();
         })
         .catch(function(error) {
             console.error('DEBUG: 加载文章失败:', error);
@@ -327,8 +352,486 @@ document.addEventListener('DOMContentLoaded', function() {
         navHomeLink.addEventListener('click', handleHomeClick);
     }
     
-
+    // 设置当前用户信息（从模板变量获取）
+    currentUser = {{ user|tojson if user else 'null' }};
+    
+    // 确保弹窗存在并设置事件
+    ensureModalExists();
 });
+
+// 评论相关函数
+function loadComments() {
+    if (!currentArticleId) return;
+    
+    fetch(`/api/comments/${currentArticleId}`)
+        .then(response => response.json())
+        .then(data => {
+            displayComments(data.comments);
+        })
+        .catch(error => {
+            console.error('加载评论失败:', error);
+            const commentsList = document.getElementById('comments-list');
+            if (commentsList) {
+                commentsList.innerHTML = '<div class="error">加载评论失败</div>';
+            }
+        });
+}
+
+function displayComments(comments) {
+    const commentsList = document.getElementById('comments-list');
+    if (!commentsList) return;
+    
+    if (comments.length === 0) {
+        commentsList.innerHTML = '';
+        return;
+    }
+    
+    let html = '';
+    comments.forEach(comment => {
+        html += createCommentHTML(comment);
+    });
+    commentsList.innerHTML = html;
+}
+
+function createCommentHTML(comment) {
+    const authorName = comment.user ? comment.user.username : (comment.anonymous_name || '匿名用户');
+    // 检查权限：评论作者或文章作者可以删除
+    const canDelete = (comment.user && currentUser && comment.user.id === currentUser.id) || 
+                     (currentUser && currentUser.id === currentArticleAuthorId);
+    
+    let html = `
+        <div class="comment" data-comment-id="${comment.id}">
+            <div class="comment-header">
+                <span class="comment-author">${authorName}</span>
+                <span class="comment-time">${comment.created_at}</span>
+                ${canDelete ? `<button onclick="deleteComment(${comment.id})" class="delete-btn">删除</button>` : ''}
+            </div>
+            <div class="comment-content">${comment.content}</div>
+            <div class="comment-actions">
+                <button onclick="showReplyForm(${comment.id})" class="reply-btn">回复</button>
+            </div>
+            <div class="reply-form" id="reply-form-${comment.id}" style="display: none;">
+                <textarea placeholder="回复评论..." rows="2"></textarea>
+                <button onclick="submitReply(${comment.id})" class="btn btn-primary">回复</button>
+                <button onclick="hideReplyForm(${comment.id})" class="btn btn-secondary">取消</button>
+            </div>
+            <div class="replies">
+    `;
+    
+    if (comment.replies && comment.replies.length > 0) {
+        comment.replies.forEach(reply => {
+            html += createReplyHTML(reply);
+        });
+    }
+    
+    html += `
+            </div>
+        </div>
+    `;
+    
+    return html;
+}
+
+function createReplyHTML(reply) {
+    const authorName = reply.user ? reply.user.username : (reply.anonymous_name || '匿名用户');
+    // 检查权限：回复作者或文章作者可以删除
+    const canDelete = (reply.user && currentUser && reply.user.id === currentUser.id) || 
+                     (currentUser && currentUser.id === currentArticleAuthorId);
+    
+    let html = `
+        <div class="reply" data-comment-id="${reply.id}">
+            <div class="comment-header">
+                <span class="comment-author">${authorName}</span>
+                <span class="comment-time">${reply.created_at}</span>
+                ${canDelete ? `<button onclick="deleteComment(${reply.id})" class="delete-btn">删除</button>` : ''}
+            </div>
+            <div class="comment-content">${reply.content}</div>
+            <div class="comment-actions">
+                <button onclick="showReplyForm(${reply.id})" class="reply-btn">回复</button>
+            </div>
+            <div class="reply-form" id="reply-form-${reply.id}" style="display: none;">
+                <textarea placeholder="回复评论..." rows="2"></textarea>
+                <button onclick="submitReply(${reply.id})" class="btn btn-primary">回复</button>
+                <button onclick="hideReplyForm(${reply.id})" class="btn btn-secondary">取消</button>
+            </div>
+            <div class="replies">
+    `;
+    
+    // 递归显示嵌套回复
+    if (reply.replies && reply.replies.length > 0) {
+        reply.replies.forEach(nestedReply => {
+            html += createReplyHTML(nestedReply);
+        });
+    }
+    
+    html += `
+            </div>
+        </div>
+    `;
+    
+    return html;
+}
+
+function submitComment() {
+    console.log('DEBUG: submitComment 函数被调用');
+    
+    if (!currentArticleId) {
+        console.error('当前没有加载文章，无法发表评论');
+        alert('请先选择一篇文章再发表评论');
+        return;
+    }
+    
+    const content = document.getElementById('comment-content').value.trim();
+    
+    console.log('DEBUG: 评论内容:', content);
+    
+    if (!content) {
+        console.log('DEBUG: 评论内容为空，显示弹窗');
+        showEmptyCommentModal();
+        return;
+    }
+    
+    console.log('DEBUG: 提交评论，文章ID:', currentArticleId, '内容:', content);
+    
+    const formData = new FormData();
+    formData.append('content', content);
+    formData.append('article_id', currentArticleId);
+    
+    fetch('/api/comments', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('网络请求失败: ' + response.status);
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('DEBUG: 评论提交成功:', data);
+        document.getElementById('comment-content').value = '';
+        loadComments(); // 重新加载评论
+    })
+    .catch(error => {
+        console.error('提交评论失败:', error);
+        alert('提交评论失败，请重试');
+    });
+}
+
+function submitReply(parentId) {
+    if (!currentArticleId) return;
+    
+    const replyForm = document.getElementById(`reply-form-${parentId}`);
+    const textarea = replyForm.querySelector('textarea');
+    
+    const content = textarea.value.trim();
+    
+    if (!content) {
+        showEmptyCommentModal('回复');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('content', content);
+    formData.append('article_id', currentArticleId);
+    formData.append('parent_id', parentId);
+    
+    fetch('/api/comments', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        textarea.value = '';
+        hideReplyForm(parentId);
+        loadComments(); // 重新加载评论
+    })
+    .catch(error => {
+        console.error('提交回复失败:', error);
+        alert('提交回复失败，请重试');
+    });
+}
+
+function showReplyForm(commentId) {
+    document.getElementById(`reply-form-${commentId}`).style.display = 'block';
+}
+
+function hideReplyForm(commentId) {
+    document.getElementById(`reply-form-${commentId}`).style.display = 'none';
+}
+
+function deleteComment(commentId) {
+    showDeleteCommentConfirm(commentId);
+}
+
+function showDeleteCommentConfirm(commentId) {
+    console.log('DEBUG: showDeleteCommentConfirm called for comment', commentId);
+    
+    // 移除旧弹窗
+    var oldModal = document.getElementById('delete-comment-modal');
+    if (oldModal) oldModal.remove();
+    
+    // 创建新弹窗
+    var modal = document.createElement('div');
+    modal.id = 'delete-comment-modal';
+    modal.style.cssText = `
+        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.5); z-index: 2000;
+        display: flex; align-items: center; justify-content: center;
+    `;
+    
+    var dialog = document.createElement('div');
+    dialog.style.cssText = `
+        background: white; border-radius: 12px; padding: 2rem;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        text-align: center; min-width: 300px;
+    `;
+    
+    dialog.innerHTML = `
+        <div style="font-size: 1.2rem; margin-bottom: 1rem; color: #d32f2f;">
+            ⚠️ 确认删除
+        </div>
+        <div style="margin-bottom: 1.5rem; color: #333;">
+            确定要删除这条评论吗？此操作不可恢复。
+        </div>
+        <div>
+            <button onclick="document.getElementById('delete-comment-modal').remove()" 
+                    style="padding: 0.5rem 1.5rem; margin-right: 1rem; border: 1px solid #ccc; 
+                           background: white; border-radius: 6px; cursor: pointer;">
+                取消
+            </button>
+            <button onclick="confirmDeleteComment(${commentId}); document.getElementById('delete-comment-modal').remove()" 
+                    style="padding: 0.5rem 1.5rem; border: none; background: #f44336; 
+                           color: white; border-radius: 6px; cursor: pointer;">
+                删除
+            </button>
+        </div>
+    `;
+    
+    modal.appendChild(dialog);
+    document.body.appendChild(modal);
+    
+    // 点击遮罩关闭
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+}
+
+function confirmDeleteComment(commentId) {
+    console.log('DEBUG: 删除评论', commentId);
+    
+    fetch(`/api/comments/${commentId}`, {
+        method: 'DELETE'
+    })
+    .then(response => response.json())
+    .then(data => {
+        loadComments(); // 重新加载评论
+    })
+    .catch(error => {
+        console.error('删除评论失败:', error);
+        alert('删除评论失败，请重试');
+    });
+}
+
+function showEmptyCommentModal(type = '评论') {
+    console.log('DEBUG: showEmptyCommentModal 被调用，类型:', type);
+    
+    const modal = document.getElementById('empty-comment-modal');
+    console.log('DEBUG: 弹窗元素:', modal);
+    
+    if (!modal) {
+        console.error('弹窗元素不存在，创建弹窗');
+        ensureModalExists();
+        // 重新获取弹窗元素
+        const newModal = document.getElementById('empty-comment-modal');
+        if (!newModal) {
+            console.error('创建弹窗失败');
+            alert(`请输入${type}内容`);
+            return;
+        }
+        // 更新消息
+        const message = newModal.querySelector('#modal-message');
+        if (message) {
+            message.textContent = `请输入${type}内容`;
+        }
+        // 显示弹窗
+        newModal.style.display = 'flex';
+        setTimeout(() => {
+            newModal.classList.add('modal-show');
+        }, 10);
+        return;
+    }
+    
+    const message = document.getElementById('modal-message');
+    if (message) {
+        message.textContent = `请输入${type}内容`;
+    }
+    
+    console.log('DEBUG: 显示弹窗');
+    modal.style.display = 'flex';
+    // 添加一个小延迟确保显示动画正常工作
+    setTimeout(() => {
+        modal.style.opacity = '1';
+        const content = modal.querySelector('.modal-content');
+        if (content) {
+            content.style.transform = 'scale(1) translateY(0)';
+        }
+        console.log('DEBUG: 弹窗已显示，元素:', modal);
+        console.log('DEBUG: 弹窗样式:', modal.style.cssText);
+    }, 10);
+}
+
+function hideEmptyCommentModal() {
+    const modal = document.getElementById('empty-comment-modal');
+    if (!modal) {
+        console.error('弹窗元素不存在');
+        return;
+    }
+    
+    modal.style.opacity = '0';
+    const content = modal.querySelector('.modal-content');
+    if (content) {
+        content.style.transform = 'scale(0.9) translateY(20px)';
+    }
+    
+    setTimeout(() => {
+        modal.style.display = 'none';
+    }, 300);
+}
+
+// 确保弹窗存在
+function ensureModalExists() {
+    let modal = document.getElementById('empty-comment-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'empty-comment-modal';
+        modal.className = 'modal-overlay';
+        modal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(8px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        `;
+        modal.innerHTML = `
+            <div class="modal-content" style="
+                background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.98) 100%);
+                backdrop-filter: blur(20px);
+                border-radius: 16px;
+                padding: 0;
+                max-width: 400px;
+                width: 90%;
+                box-shadow: 0 20px 60px rgba(5, 150, 105, 0.15), 0 8px 24px rgba(0, 0, 0, 0.1);
+                border: 1px solid rgba(5, 150, 105, 0.1);
+                transform: scale(0.9) translateY(20px);
+                transition: all 0.3s ease;
+                position: relative;
+                overflow: hidden;
+            ">
+                <div style="
+                    content: '';
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    height: 3px;
+                    background: linear-gradient(90deg, #059669, #10b981, #34d399);
+                "></div>
+                <div class="modal-header" style="
+                    padding: 1.5rem 1.5rem 0.5rem;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    border-bottom: 1px solid rgba(5, 150, 105, 0.1);
+                ">
+                    <h3 style="
+                        margin: 0;
+                        color: #166534;
+                        font-size: 1.25rem;
+                        font-weight: 600;
+                    ">📝 提示</h3>
+                    <button class="modal-close" onclick="hideEmptyCommentModal()" style="
+                        background: none;
+                        border: none;
+                        font-size: 1.5rem;
+                        color: #6b7280;
+                        cursor: pointer;
+                        padding: 0.25rem;
+                        border-radius: 6px;
+                        transition: all 0.2s ease;
+                        line-height: 1;
+                    ">&times;</button>
+                </div>
+                <div class="modal-body" style="
+                    padding: 1.5rem;
+                ">
+                    <p id="modal-message" style="
+                        margin: 0;
+                        color: #374151;
+                        font-size: 1rem;
+                        line-height: 1.6;
+                        text-align: center;
+                    ">请输入评论内容</p>
+                </div>
+                <div class="modal-footer" style="
+                    padding: 0.5rem 1.5rem 1.5rem;
+                    display: flex;
+                    justify-content: center;
+                    gap: 1rem;
+                ">
+                    <button class="btn btn-primary" onclick="hideEmptyCommentModal()" style="
+                        padding: 0.75rem 2rem;
+                        font-size: 0.95rem;
+                        font-weight: 600;
+                        border-radius: 10px;
+                        background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+                        border: none;
+                        color: white;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        position: relative;
+                        overflow: hidden;
+                        box-shadow: 0 4px 12px rgba(5, 150, 105, 0.3);
+                    ">确定</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        setupModalEvents();
+    }
+}
+
+// 点击背景关闭弹窗
+function setupModalEvents() {
+    const modal = document.getElementById('empty-comment-modal');
+    if (modal) {
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) {
+                hideEmptyCommentModal();
+            }
+        });
+    }
+    
+    // ESC键关闭弹窗
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            const modal = document.getElementById('empty-comment-modal');
+            if (modal && modal.style.display === 'flex') {
+                hideEmptyCommentModal();
+            }
+        }
+    });
+}
 </script>
 <style>
 .collapsible {

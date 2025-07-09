@@ -2,7 +2,9 @@
 {% block content %}
 <div class="card">
     <h1>🔐 用户登录</h1>
-    
+    {% if msg %}
+      <div class="message error" style="margin-bottom:1rem;">{{ msg }}</div>
+    {% endif %}
     <form method="post">
         <div class="form-group">
             <label for="username">用户名:</label>

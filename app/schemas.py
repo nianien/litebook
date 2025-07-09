@@ -40,3 +40,26 @@ class ViewRecordOut(BaseModel):
     viewed_at: datetime
     class Config:
         from_attributes = True
+
+# 评论相关模式
+class CommentBase(BaseModel):
+    content: str
+    anonymous_name: Optional[str] = None
+
+class CommentCreate(CommentBase):
+    article_id: int
+    parent_id: Optional[int] = None
+
+class CommentOut(CommentBase):
+    id: int
+    created_at: datetime
+    article_id: int
+    user: Optional[UserOut] = None
+    parent_id: Optional[int] = None
+    replies: List['CommentOut'] = []
+    
+    class Config:
+        from_attributes = True
+
+# 解决循环引用
+CommentOut.model_rebuild()

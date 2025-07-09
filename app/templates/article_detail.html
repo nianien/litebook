@@ -77,6 +77,29 @@
                 {{ article.author.username if article.author else '匿名' }} • {{ article.created_at.strftime('%Y-%m-%d %H:%M') if article.created_at else '' }}
             </div>
         </div>
+        
+        <!-- 评论区域 -->
+        <div class="comments-section">
+            <h3>💬 评论</h3>
+            
+            <!-- 评论表单 -->
+            <div class="comment-form">
+                <div class="form-group">
+                    <textarea id="comment-content" placeholder="写下你的评论..." rows="3"></textarea>
+                </div>
+                <div class="form-group anonymous-section" id="anonymous-section">
+                    <input type="text" id="anonymous-name" placeholder="匿名昵称（可选）" maxlength="32">
+                </div>
+                <div class="form-group">
+                    <button type="button" onclick="submitComment()" class="btn btn-primary">发表评论</button>
+                </div>
+            </div>
+            
+            <!-- 评论列表 -->
+            <div class="comments-list" id="comments-list">
+                <div class="loading">加载评论中...</div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -88,7 +111,190 @@ document.addEventListener('DOMContentLoaded', function() {
     if (currentItem) {
         currentItem.classList.add('active');
     }
+    
+    // 加载评论
+    loadComments();
 });
+
+// 定义全局变量
+const currentUser = {{ user|tojson if user else 'null' }};
+const currentArticleId = {{ article.id }};
+
+// 评论相关函数
+function loadComments() {
+    const articleId = currentArticleId;
+    fetch(`/api/comments/${articleId}`)
+        .then(response => response.json())
+        .then(data => {
+            displayComments(data.comments);
+        })
+        .catch(error => {
+            console.error('加载评论失败:', error);
+            document.getElementById('comments-list').innerHTML = '<div class="error">加载评论失败</div>';
+        });
+}
+
+function displayComments(comments) {
+    const commentsList = document.getElementById('comments-list');
+    if (comments.length === 0) {
+        commentsList.innerHTML = '<div class="no-comments">暂无评论，快来发表第一条评论吧！</div>';
+        return;
+    }
+    
+    let html = '';
+    comments.forEach(comment => {
+        html += createCommentHTML(comment);
+    });
+    commentsList.innerHTML = html;
+}
+
+function createCommentHTML(comment) {
+    const authorName = comment.user ? comment.user.username : (comment.anonymous_name || '匿名用户');
+    const canDelete = comment.user && currentUser && comment.user.id === currentUser.id;
+    
+    let html = `
+        <div class="comment" data-comment-id="${comment.id}">
+            <div class="comment-header">
+                <span class="comment-author">${authorName}</span>
+                <span class="comment-time">${comment.created_at}</span>
+                ${canDelete ? `<button onclick="deleteComment(${comment.id})" class="delete-btn">删除</button>` : ''}
+            </div>
+            <div class="comment-content">${comment.content}</div>
+            <div class="comment-actions">
+                <button onclick="showReplyForm(${comment.id})" class="reply-btn">回复</button>
+            </div>
+            <div class="reply-form" id="reply-form-${comment.id}" style="display: none;">
+                <textarea placeholder="回复评论..." rows="2"></textarea>
+                <div class="form-group anonymous-section">
+                    <input type="text" placeholder="匿名昵称（可选）" maxlength="32">
+                </div>
+                <button onclick="submitReply(${comment.id})" class="btn btn-primary">回复</button>
+                <button onclick="hideReplyForm(${comment.id})" class="btn btn-secondary">取消</button>
+            </div>
+            <div class="replies">
+    `;
+    
+    if (comment.replies && comment.replies.length > 0) {
+        comment.replies.forEach(reply => {
+            html += createReplyHTML(reply);
+        });
+    }
+    
+    html += `
+            </div>
+        </div>
+    `;
+    
+    return html;
+}
+
+function createReplyHTML(reply) {
+    const authorName = reply.user ? reply.user.username : (reply.anonymous_name || '匿名用户');
+    const canDelete = reply.user && currentUser && reply.user.id === currentUser.id;
+    
+    return `
+        <div class="reply" data-comment-id="${reply.id}">
+            <div class="comment-header">
+                <span class="comment-author">${authorName}</span>
+                <span class="comment-time">${reply.created_at}</span>
+                ${canDelete ? `<button onclick="deleteComment(${reply.id})" class="delete-btn">删除</button>` : ''}
+            </div>
+            <div class="comment-content">${reply.content}</div>
+        </div>
+    `;
+}
+
+function submitComment() {
+    const content = document.getElementById('comment-content').value.trim();
+    const anonymousName = document.getElementById('anonymous-name').value.trim();
+    
+    if (!content) {
+        alert('请输入评论内容');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('content', content);
+    formData.append('article_id', currentArticleId);
+    formData.append('anonymous_name', anonymousName);
+    
+    fetch('/api/comments', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        document.getElementById('comment-content').value = '';
+        document.getElementById('anonymous-name').value = '';
+        loadComments(); // 重新加载评论
+    })
+    .catch(error => {
+        console.error('提交评论失败:', error);
+        alert('提交评论失败，请重试');
+    });
+}
+
+function submitReply(parentId) {
+    const replyForm = document.getElementById(`reply-form-${parentId}`);
+    const textarea = replyForm.querySelector('textarea');
+    const anonymousInput = replyForm.querySelector('input[type="text"]');
+    
+    const content = textarea.value.trim();
+    const anonymousName = anonymousInput.value.trim();
+    
+    if (!content) {
+        alert('请输入回复内容');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('content', content);
+    formData.append('article_id', currentArticleId);
+    formData.append('parent_id', parentId);
+    formData.append('anonymous_name', anonymousName);
+    
+    fetch('/api/comments', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        textarea.value = '';
+        anonymousInput.value = '';
+        hideReplyForm(parentId);
+        loadComments(); // 重新加载评论
+    })
+    .catch(error => {
+        console.error('提交回复失败:', error);
+        alert('提交回复失败，请重试');
+    });
+}
+
+function showReplyForm(commentId) {
+    document.getElementById(`reply-form-${commentId}`).style.display = 'block';
+}
+
+function hideReplyForm(commentId) {
+    document.getElementById(`reply-form-${commentId}`).style.display = 'none';
+}
+
+function deleteComment(commentId) {
+    if (!confirm('确定要删除这条评论吗？')) {
+        return;
+    }
+    
+    fetch(`/api/comments/${commentId}`, {
+        method: 'DELETE'
+    })
+    .then(response => response.json())
+    .then(data => {
+        loadComments(); // 重新加载评论
+    })
+    .catch(error => {
+        console.error('删除评论失败:', error);
+        alert('删除评论失败，请重试');
+    });
+}
 
 function loadArticle(articleId) {
     document.querySelectorAll('.article-item').forEach(function(item) {
@@ -113,7 +319,27 @@ function loadArticle(articleId) {
                 '<h1>' + data.title + '</h1>' +
                 '<div class="article-content">' + data.content + '</div>' +
                 '<div class="article-meta right">' + data.author + ' • ' + data.created_at + '</div>' +
+                '</div>' +
+                '<div class="comments-section">' +
+                '<h3>💬 评论</h3>' +
+                '<div class="comment-form">' +
+                '<div class="form-group">' +
+                '<textarea id="comment-content" placeholder="写下你的评论..." rows="3"></textarea>' +
+                '</div>' +
+                '<div class="form-group anonymous-section" id="anonymous-section">' +
+                '<input type="text" id="anonymous-name" placeholder="匿名昵称（可选）" maxlength="32">' +
+                '</div>' +
+                '<div class="form-group">' +
+                '<button type="button" onclick="submitComment()" class="btn btn-primary">发表评论</button>' +
+                '</div>' +
+                '</div>' +
+                '<div class="comments-list" id="comments-list">' +
+                '<div class="loading">加载评论中...</div>' +
+                '</div>' +
                 '</div>';
+            
+            // 重新加载评论
+            loadComments();
         })
         .catch(function(error) {
             var contentArea = document.getElementById('article-content');
