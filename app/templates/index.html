@@ -63,7 +63,7 @@
         {% if first_article is defined and first_article %}
             <div class="card">
                 <h1>{{ first_article.title }}</h1>
-                <div class="article-content">{{ first_article.content }}</div>
+                <div class="article-content">{{ first_article.content|safe }}</div>
                 <div class="article-meta right">
                     {{ first_article.author.username if first_article.author else '匿名' }} • {{ first_article.created_at.strftime('%Y-%m-%d %H:%M') if first_article.created_at else '' }}
                 </div>
@@ -231,6 +231,7 @@ function updateArticleDisplay(data) {
     const fragment = document.createDocumentFragment();
     const articleDiv = document.createElement('div');
     
+    // 创建HTML结构，但不包含文章内容
     articleDiv.innerHTML =
         '<div class="card">' +
         (data.can_edit ?
@@ -240,7 +241,7 @@ function updateArticleDisplay(data) {
             '<a href="#" onclick="showDeleteConfirm(' + currentArticleId + '); return false;" class="action-link delete">🗑️ 删除</a>' +
         '</div>' : '') +
         '<h1>' + data.title + '</h1>' +
-        '<div class="article-content">' + data.content + '</div>' +
+        '<div class="article-content"></div>' +
         '<div class="article-meta right">' + data.author + ' • ' + data.created_at + '</div>' +
         '</div>' +
         '<div class="comments-section">' +
@@ -261,6 +262,12 @@ function updateArticleDisplay(data) {
     fragment.appendChild(articleDiv);
     contentArea.innerHTML = '';
     contentArea.appendChild(fragment);
+    
+    // 然后单独设置文章内容，避免转义
+    const articleContentDiv = contentArea.querySelector('.article-content');
+    if (articleContentDiv) {
+        articleContentDiv.innerHTML = data.content || '';
+    }
 }
 
 // 页面初始化

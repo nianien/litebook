@@ -308,16 +308,18 @@ function loadArticle(articleId) {
         .then(function(response) { return response.json(); })
         .then(function(data) {
             var contentArea = document.getElementById('article-content');
-            contentArea.innerHTML =
-                '<div class="card">' +
-                (data.can_edit ?
-                '<div class="article-actions-top">' +
+            
+            // 创建HTML结构
+            var html = '<div class="card">';
+            if (data.can_edit) {
+                html += '<div class="article-actions-top">' +
                     '<a href="/article/' + articleId + '/edit" class="action-link edit">✏️ 编辑</a>' +
                     '<span class="action-separator">|</span>' +
                     '<a href="#" onclick="showDeleteConfirm(' + articleId + ')" class="action-link delete">🗑️ 删除</a>' +
-                '</div>' : '') +
-                '<h1>' + data.title + '</h1>' +
-                '<div class="article-content">' + data.content + '</div>' +
+                    '</div>';
+            }
+            html += '<h1>' + data.title + '</h1>' +
+                '<div class="article-content"></div>' +
                 '<div class="article-meta right">' + data.author + ' • ' + data.created_at + '</div>' +
                 '</div>' +
                 '<div class="comments-section">' +
@@ -338,16 +340,21 @@ function loadArticle(articleId) {
                 '</div>' +
                 '</div>';
             
+            // 先设置HTML结构
+            contentArea.innerHTML = html;
+            
+            // 然后单独设置文章内容，避免转义
+            var articleContentDiv = contentArea.querySelector('.article-content');
+            if (articleContentDiv) {
+                articleContentDiv.innerHTML = data.content || '';
+            }
+            
             // 重新加载评论
             loadComments();
         })
         .catch(function(error) {
-            var contentArea = document.getElementById('article-content');
-            contentArea.innerHTML =
-                '<div class="empty-state">' +
-                    '<h3>❌ 加载失败</h3>' +
-                    '<p>无法加载文章内容，请稍后重试</p>' +
-                '</div>';
+            console.error('加载文章失败:', error);
+            document.getElementById('article-content').innerHTML = '<div class="error">加载文章失败</div>';
         });
 }
 

@@ -8,6 +8,8 @@ from sqlalchemy import distinct
 
 import os
 from collections import defaultdict
+import re
+from typing import Optional
 
 app = FastAPI(
     title="LiteBlog",
@@ -64,6 +66,10 @@ def get_grouped_data(db, request, per_page=10):
             "end_page": end_page,
         })
     return grouped_data
+
+def is_html_content(content: str) -> bool:
+    """检测内容是否为HTML格式 - 现在所有内容都按HTML处理"""
+    return True
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request, db: Session = Depends(deps.get_db)):
@@ -222,10 +228,13 @@ def get_article_content(article_id: int, request: Request, db: Session = Depends
     user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
     can_edit = user_id == int(article.author_id) if article.author else False
     
+    # 返回原始内容，不进行HTML转义
+    content = str(article.content) if article.content else ""
+    
     return {
         "id": article.id,
         "title": article.title,
-        "content": article.content,
+        "content": content,
         "author": article.author.username if article.author else "匿名",
         "author_id": article.author_id,
         "created_at": article.created_at.strftime('%Y-%m-%d %H:%M') if article.created_at else "",

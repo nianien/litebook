@@ -80,8 +80,8 @@ document.addEventListener('DOMContentLoaded', function() {
         // Prevent default submission
         e.preventDefault();
         
-        // Get content as text, preserving line breaks but removing HTML tags
-        var content = quill.getText();
+        // Get content as HTML to preserve formatting
+        var content = quill.root.innerHTML;
         document.getElementById('content').value = content;
         
         // Force a small delay to ensure content is set, then submit

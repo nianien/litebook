@@ -8,7 +8,7 @@
     </div>
     {% endif %}
     <h1>{{ article.title }}</h1>
-    <div class="article-content">{{ article.content }}</div>
+    <div class="article-content">{{ article.content|safe }}</div>
     <div class="article-meta right">
         {{ article.author.username if article.author else '匿名' }} • {{ article.created_at.strftime('%Y-%m-%d %H:%M') if article.created_at else '' }}
     </div>

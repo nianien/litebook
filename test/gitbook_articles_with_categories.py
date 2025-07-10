@@ -29,6 +29,9 @@ def extract_title_and_content(html_content):
     title_elem = soup.find('h1')
     if title_elem:
         title = title_elem.get_text(strip=True)
+        # 从DOM中移除标题元素，避免在content中包含标题
+        title_elem.decompose()
+    
     content = ""
     content_elem = soup.find('div', class_='page-inner')
     if not content_elem:
@@ -39,9 +42,17 @@ def extract_title_and_content(html_content):
         content_elem = soup.find('article')
     if not content_elem:
         content_elem = soup.body
+    
     if isinstance(content_elem, Tag):
+        # 移除所有标题元素（h1, h2, h3, h4, h5, h6），避免在content中包含标题
+        for header in content_elem.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']):
+            header.decompose()
+        
+        # 移除其他不需要的元素
         for elem in content_elem.find_all(["script", "style", "nav", "header", "footer", "aside", "form", "input", "button"]):
             elem.decompose()
+        
+        # 移除包含特定关键词的元素
         for elem in content_elem.find_all(string=True):
             if elem and hasattr(elem, 'parent') and elem.parent:
                 text = str(elem).strip()
@@ -50,7 +61,16 @@ def extract_title_and_content(html_content):
                     "filter", "sort", "pagination", "navigation", "menu", "sidebar"
                 ]):
                     elem.parent.decompose()
+        
         content = content_elem.get_text("\n", strip=True)
+        
+        # 清理content，移除开头的多余空白和换行
+        content = content.strip()
+        
+        # 如果content以title开头，则移除title部分
+        if title and content.startswith(title):
+            content = content[len(title):].strip()
+    
     return title, content
 
 def parse_gitbook_articles(base_dir):

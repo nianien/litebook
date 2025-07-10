@@ -12,7 +12,7 @@ import pymysql
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import sys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../app')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from app.models import Article, User
 
 # 加载.env环境变量
@@ -48,7 +48,7 @@ def main():
         session.query(Article).delete()
         session.commit()
         print("已清空article表")
-        with open("gitbook_articles_with_categories.csv", "r", encoding="utf-8") as f:
+        with open("test/gitbook_articles_with_categories.csv", "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             count = 0
             for row in reader:

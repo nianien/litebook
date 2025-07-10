@@ -449,6 +449,14 @@ h2 {
     box-shadow: 0 4px 20px rgba(139, 195, 74, 0.05);
     border: 1px solid #c5e1a5;
     backdrop-filter: blur(10px);
+    white-space: pre-wrap;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.article-content p {
+    margin-bottom: 1.2rem;
+    white-space: normal;
+    line-height: 1.8;
 }
 
 .article-content p,
@@ -462,8 +470,6 @@ h2 {
 .article-content ol,
 .article-content pre,
 .article-content blockquote {
-    background: linear-gradient(135deg, #fff0f0 0%, #ffd6d6 100%) !important;
-    border-radius: 8px;
     padding: 0.5em 1em;
     margin-bottom: 1.2em;
     box-sizing: border-box;
@@ -475,15 +481,15 @@ h2 {
 
 .article-content blockquote {
     padding: 1em 1.5em;
-    border-left: 4px solid #f44336;
+    border-left: 4px solid #4caf50;
     font-style: italic;
     color: #555;
-    background: linear-gradient(135deg, #fff0f0 0%, #ffd6d6 100%) !important;
 }
 
 .article-content p {
     margin-bottom: 1.2rem;
-    text-indent: 2em;
+    white-space: normal;
+    line-height: 1.8;
 }
 
 .article-content h1,
@@ -834,14 +840,6 @@ footer {
 
 @media (max-width: 600px) {
   .card .article-meta.right {
-    background: red !important;
-    color: #fff !important;
-    font-size: 2rem !important;
-    border: 5px solid blue !important;
-    position: absolute !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    z-index: 9999 !important;
     display: flex;
     justify-content: flex-end;
     align-items: center;
@@ -1826,4 +1824,5 @@ footer {
         padding: 0.5rem;
     }
 }
+
 
