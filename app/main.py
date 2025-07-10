@@ -1,15 +1,13 @@
-from fastapi import FastAPI, Depends, Request, Form, status, HTTPException
-from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
-from sqlalchemy.orm import Session
-from . import models, schemas, crud, auth, deps
-from sqlalchemy import distinct
-
 import os
 from collections import defaultdict
-import re
-from typing import Optional
+
+from fastapi import FastAPI, Depends, Request, Form, HTTPException
+from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session
+
+from . import models, schemas, crud, auth, deps
 
 app = FastAPI(
     title="LiteBlog",
@@ -26,7 +24,7 @@ templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "t
 def group_articles_by_category(articles):
     groups = defaultdict(list)
     for article in articles:
-        key = getattr(article, "category", "未分类")
+        key = getattr(article, "category", "默认")
         groups[key].append(article)
     return sorted(groups.items())
 
@@ -73,7 +71,7 @@ def is_html_content(content: str) -> bool:
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request, db: Session = Depends(deps.get_db)):
-    per_page = 10
+    per_page = 5
     grouped_data = get_grouped_data(db, request, per_page)
     first_article = None
     highlight_id = request.query_params.get('highlight_id')
