@@ -15,7 +15,6 @@ ENV/
 *.iml
 
 # Test, log, and temp files
-test/
 *.log
 *.tmp
 *.swp
@@ -36,3 +35,4 @@ sqlite_history
 .env
 credentials.json
 /cookies.txt
+/test/blog.db

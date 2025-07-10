@@ -1,0 +1,42 @@
+import os
+
+from dotenv import load_dotenv
+from google.cloud.sql.connector import Connector
+from sqlalchemy import create_engine, text
+
+load_dotenv()
+
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_NAME = os.getenv("DB_NAME")
+INSTANCE_CONNECTION_NAME = os.getenv("INSTANCE_CONNECTION_NAME")
+
+connector = Connector()
+
+def getconn():
+    if not INSTANCE_CONNECTION_NAME:
+        raise RuntimeError("INSTANCE_CONNECTION_NAME 环境变量未设置，无法连接 Cloud SQL 实例。")
+    return connector.connect(
+        str(INSTANCE_CONNECTION_NAME),
+        "pymysql",
+        user=DB_USER,
+        password=DB_PASSWORD,
+        db=DB_NAME
+    )
+
+url = "mysql+pymysql://"
+engine = create_engine(
+    url,
+    creator=getconn,
+    pool_pre_ping=True,
+    pool_recycle=3600,
+)
+
+try:
+    with engine.connect() as conn:
+        print("SQLAlchemy 连接成功！")
+        result = conn.execute(text("SHOW TABLES"))
+        tables = result.fetchall()
+        print("当前数据库表：", tables)
+except Exception as e:
+    print("SQLAlchemy 连接失败:", e) 
