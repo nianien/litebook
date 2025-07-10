@@ -1,9 +1,11 @@
 from datetime import datetime, timedelta
-from jose import JWTError, jwt
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
 from sqlalchemy.orm import Session
-from . import crud, models
+
+from . import crud
 
 SECRET_KEY = "your-secret-key"
 ALGORITHM = "HS256"
