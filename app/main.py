@@ -101,12 +101,16 @@ def index(request: Request, db: Session = Depends(deps.get_db)):
 
 @app.get("/register", response_class=HTMLResponse)
 def register_page(request: Request):
-    return templates.TemplateResponse("register.html", {"request": request})
+    response = templates.TemplateResponse("register.html", {"request": request})
+    response.headers["Content-Type"] = "text/html; charset=utf-8"
+    return response
 
 @app.post("/register")
 def register(request: Request, username: str = Form(...), password: str = Form(...), db: Session = Depends(deps.get_db)):
     if crud.get_user_by_username(db, username):
-        return templates.TemplateResponse("register.html", {"request": request, "msg": "用户名已存在"})
+        response = templates.TemplateResponse("register.html", {"request": request, "msg": "用户名已存在"})
+        response.headers["Content-Type"] = "text/html; charset=utf-8"
+        return response
     crud.create_user(db, schemas.UserCreate(username=username, password=password))
     return RedirectResponse("/login", status_code=302)
 
