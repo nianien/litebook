@@ -37,10 +37,10 @@ gcloud beta billing projects link nianien \
 
 # 创建 Artifact Registry 仓库
 ```shell
-gcloud artifacts repositories create liteblog \
+gcloud artifacts repositories create book \
   --repository-format=docker \
   --location=asia-east1 \
-  --description="lite blog by FastAPI"
+  --description="eBook built by FastAPI"
 ```
 
 
@@ -69,7 +69,7 @@ gcloud builds submit \
 
 # 部署启动
 ```shell
-gcloud run deploy liteblog \
+gcloud run deploy book \
   --image asia-east1-docker.pkg.dev/nianien/liteblog/liteblog-app:latest \
   --platform managed \
   --region asia-east1 \
