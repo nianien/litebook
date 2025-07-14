@@ -4,10 +4,10 @@
 #GCP Project（nianien）
  #│
  #├── Artifact Registry
- #│   ├── Repository: my-fastapi (Docker)
- #│   │   ├── Image: fastapi-app:latest
- #│   │   └── Image: fastapi-app:v1
- #│   └── Repository: my-python (Python 包)
+ #│   ├── Repository: litebook (Docker)
+ #│   │   ├── Image: litebook-app:latest
+ #│   │   └── Image: litebook-app:v1
+ #│   └── Repository: myblog (Python 包)
  #│
  #├── Cloud Run 服务
  #├── Cloud Build 任务
@@ -37,7 +37,7 @@ gcloud beta billing projects link nianien \
 
 # 创建 Artifact Registry 仓库
 ```shell
-gcloud artifacts repositories create book \
+gcloud artifacts repositories create litebook \
   --repository-format=docker \
   --location=asia-east1 \
   --description="eBook built by FastAPI"
@@ -48,7 +48,7 @@ gcloud artifacts repositories create book \
 ```shell
 gcloud auth configure-docker asia-east1-docker.pkg.dev
 ```
-# 本地构建
+# 本地构建(不建议,本地环境与云环境不同)
 ```shell
 # 构建镜像
 #确保登录并设置Docker认证
@@ -57,20 +57,20 @@ gcloud auth configure-docker asia-east1-docker.pkg.dev
 # 推送镜像到Artifact Registry
 docker buildx build \
   --platform linux/amd64 \
-  -t asia-east1-docker.pkg.dev/nianien/liteblog/liteblog-app:latest \
+  -t asia-east1-docker.pkg.dev/nianien/litebook/litebook-app:latest \
   --push .
 ```
 
 # 远程构建(建议)
 ```shell
 gcloud builds submit \
-  --tag asia-east1-docker.pkg.dev/nianien/liteblog/liteblog-app:latest .
+  --tag asia-east1-docker.pkg.dev/nianien/litebook/litebook-app:latest .
 ```
 
 # 部署启动
 ```shell
-gcloud run deploy book \
-  --image asia-east1-docker.pkg.dev/nianien/liteblog/liteblog-app:latest \
+gcloud run deploy litebook \
+  --image asia-east1-docker.pkg.dev/nianien/litebook/litebook-app:latest \
   --platform managed \
   --region asia-east1 \
   --allow-unauthenticated
@@ -79,17 +79,18 @@ gcloud run deploy book \
 # 本地docker启动
 ```shell
 # 构建镜像
-docker build -t liteblog:latest .
+docker build -t litebook-app:latest .
 # 删除旧容器
-docker rm -f liteblog_app
+docker rm -f litebook-app
 # 运行容器
-docker run -d --name liteblog_app -p 8000:8080 --env-file .env liteblog:latest
+docker run -d --name litebook-app -p 8000:8080 --env-file .env liteblog:latest
 
 # 查看日志
-docker logs --tail 50 liteblog_app
+docker logs --tail 50 litebook-app
 ```
 
 # 本地服务器启动
 ```shell
-GOOGLE_APPLICATION_CREDENTIALS="/Users/skyfalling/Workspace/cloud/liteblog/credentials.json" uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+GOOGLE_APPLICATION_CREDENTIALS="/Users/skyfalling/Workspace/cloud/liteblog/credentials.json" \
+  uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
