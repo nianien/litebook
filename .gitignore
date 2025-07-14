@@ -3,36 +3,111 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.Python
 
 # Virtual environments
 .venv/
 venv/
 ENV/
+env/
+.venv
 
 # IDE settings
 .idea/
 .vscode/
 *.iml
+*.iws
+*.ipr
 
 # Test, log, and temp files
 *.log
 *.tmp
 *.swp
+*.swo
+*~
 .DS_Store
+Thumbs.db
 
 # Build scripts and cache
-scripts/build.sh
 *.egg-info/
 .eggs/
 dist/
 build/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
 
-# SQLite history
+# SQLite history and databases
 sqlite_history
+*.db
+*.sqlite
+*.sqlite3
 
 # 保留 blog.db，不要排除
-!blog.db 
+!blog.db
+
+# Environment variables and secrets
 .env
+.env.local
+.env.development
+.env.test
+.env.production
 credentials.json
-/cookies.txt
-/test/blog.db
+service-account-key.json
+*.pem
+*.key
+
+# Google Cloud specific
+gcloud/
+.cookies.txt
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# Pyre type checker
+.pyre/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# Pyre type checker
+.pyre/
+
+# Local development
+local_settings.py
