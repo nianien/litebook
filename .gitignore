@@ -21,7 +21,7 @@ ENV/
 .DS_Store
 
 # Build scripts and cache
-build.sh
+scripts/build.sh
 *.egg-info/
 .eggs/
 dist/

@@ -22,7 +22,7 @@ test/
 .DS_Store
 
 # 忽略构建脚本和缓存
-build.sh
+scripts/
 *.egg-info/
 .eggs/
 dist/
