@@ -163,7 +163,25 @@ const loadArticle = debounce(function(articleId) {
     const cacheKey = 'article_' + articleId;
     const cachedData = getCachedData(cacheKey);
     if (cachedData) {
+        // 更新当前文章ID
+        currentArticleId = articleId;
+        
+        // 更新高亮状态
+        document.querySelectorAll('.article-item').forEach(function(item) {
+            item.classList.remove('active');
+        });
+        
+        const currentItem = document.querySelector('[data-article-id="' + articleId + '"]');
+        if (currentItem) {
+            currentItem.classList.add('active');
+            currentItem.scrollIntoView({block: 'center', behavior: 'smooth'});
+        }
+        
         updateArticleDisplay(cachedData);
+        // 确保弹窗在body中
+        ensureModalExists();
+        // 延迟加载评论
+        setTimeout(() => loadComments(), 50);
         return;
     }
     
@@ -202,9 +220,6 @@ const loadArticle = debounce(function(articleId) {
             
             // 确保弹窗在body中
             ensureModalExists();
-            
-            // 延迟加载评论
-            setTimeout(() => loadComments(), 100);
         })
         .catch(function(error) {
             console.error('加载文章失败:', error);
@@ -268,6 +283,9 @@ function updateArticleDisplay(data) {
     if (articleContentDiv) {
         articleContentDiv.innerHTML = data.content || '';
     }
+    
+    // 延迟加载评论
+    setTimeout(() => loadComments(), 50);
 }
 
 // 页面初始化
@@ -397,12 +415,20 @@ function handleHomeClick(e) {
 const loadComments = debounce(function() {
     if (!currentArticleId) return;
     
+    const commentsList = document.getElementById('comments-list');
+    if (!commentsList) return;
+    
     const cacheKey = 'comments_' + currentArticleId;
     const cachedComments = getCachedData(cacheKey);
+    
+    // 如果有缓存数据，直接显示
     if (cachedComments) {
         displayComments(cachedComments);
         return;
     }
+    
+    // 显示加载状态
+    commentsList.innerHTML = '<div class="loading">加载评论中...</div>';
     
     fetch('/api/comments/' + currentArticleId)
         .then(response => response.json())
@@ -412,7 +438,6 @@ const loadComments = debounce(function() {
         })
         .catch(error => {
             console.error('加载评论失败:', error);
-            const commentsList = document.getElementById('comments-list');
             if (commentsList) {
                 commentsList.innerHTML = '<div class="error">加载评论失败</div>';
             }
@@ -425,7 +450,7 @@ function displayComments(comments) {
     if (!commentsList) return;
     
     if (comments.length === 0) {
-        commentsList.innerHTML = '';
+        commentsList.innerHTML = '<div class="no-comments">暂无评论，快来发表第一条评论吧！</div>';
         return;
     }
     
@@ -799,10 +824,31 @@ setInterval(() => {
     margin-left: 0.3em;
     font-weight: 400;
 }
-.article-item.active {
-    background: #eafbe6;
-    border-radius: 4px;
-    color: #2d4f2d;
+
+
+.no-comments {
+    text-align: center;
+    padding: 2rem;
+    color: #6b7280;
+    font-style: italic;
+    background: rgba(249, 250, 251, 0.8);
+    border-radius: 8px;
+    border: 1px dashed #d1d5db;
+}
+
+.loading {
+    text-align: center;
+    padding: 1rem;
+    color: #6b7280;
+}
+
+.error {
+    text-align: center;
+    padding: 1rem;
+    color: #dc2626;
+    background: rgba(254, 242, 242, 0.8);
+    border-radius: 8px;
+    border: 1px solid #fecaca;
 }
 /* Modal styles now in style.css */
 </style>
