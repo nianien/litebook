@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="layout-split">
-    <!-- 左侧文章列表 -->
+    <!-- 左侧区域：若有 grouped_data 则展示分组列表，否则展示推荐 -->
     <div class="sidebar">
-        <h2>📚 文章列表</h2>
         {% if grouped_data %}
+            <h2>📚 文章列表</h2>
             {% for group in grouped_data %}
             {% set cat_id = group.category|replace(' ', '_')|replace('（', '_')|replace('）', '_')|replace('(', '_')|replace(')', '_')|replace('/', '_')|replace('\\', '_') %}
             <div class="article-group">
@@ -14,17 +14,16 @@
                 <div class="group-content" id="group-content-{{ cat_id }}">
                     <ul class="article-list" id="group-list-{{ cat_id }}">
                         {% for article in group.articles %}
-                        <li class="article-item" data-article-id="{{ article.id }}" onclick="loadArticle({{ article.id }})">
+                        <li class="article-item" data-article-id="{{ article.id }}" onclick="loadArticle(parseInt(this.getAttribute('data-article-id')))">
                             <div class="article-title">{{ article.title }}</div>
                             <div class="article-meta">
-                                <span class="article-author">{{ article.author.username }}</span>
+                                <span class="article-author">{{ article.author.nickname or article.author.username }}</span>
                                 <span class="article-date">{{ article.created_at.strftime('%Y-%m-%d') }}</span>
                             </div>
                         </li>
                         {% endfor %}
                     </ul>
                     <div class="pagination-controls">
-                        {# --- Pagination: << < x > >>, with special cases for x=1 and x=n --- #}
                         {% set n = group.total_pages %}
                         {% set x = group.current_page %}
                         {% set cat = cat_id %}
@@ -54,7 +53,103 @@
             </div>
             {% endfor %}
         {% else %}
-            <div class="empty-state">暂无文章</div>
+            <h2>⭐ 文章推荐</h2>
+            <div class="article-group">
+                <div class="article-group-title collapsible" onclick="toggleGroup('latest')" id="group-title-latest">
+                    <span class="collapse-arrow" id="arrow-latest">&gt;</span> 最新文章
+                </div>
+                <div class="group-content" id="group-content-latest">
+                <ul class="article-list" id="group-list-latest">
+                    {% for article in latest_articles %}
+                    <li class="article-item" data-article-id="{{ article.id }}" onclick="loadArticle(parseInt(this.getAttribute('data-article-id')))">
+                        <div class="article-title">{{ article.title }}</div>
+                        <div class="article-meta">
+                            <span class="article-author">{{ article.author.nickname or article.author.username if article.author else '匿名' }}</span>
+                            <span class="article-date">{{ article.created_at.strftime('%Y-%m-%d') if article.created_at else '' }}</span>
+                        </div>
+                    </li>
+                    {% endfor %}
+                    {% if not latest_articles or latest_articles|length == 0 %}
+                    <li class="article-item disabled">
+                        <div class="article-title">暂无最新文章</div>
+                    </li>
+                    {% endif %}
+                </ul>
+                <div class="pagination-controls">
+                    {% set n = total_latest_pages %}
+                    {% set x = page_latest %}
+                    {% if n > 1 %}
+                        {% if x == 1 %}
+                            <span class="page-link active">1</span>
+                            {% if n > 1 %}
+                                <a class="page-link" href="/?page_latest={{ x+1 }}#group-latest">&gt;</a>
+                                <a class="page-link" href="/?page_latest={{ n }}#group-latest">&gt;&gt;</a>
+                            {% endif %}
+                        {% elif x == n %}
+                            <a class="page-link" href="/?page_latest=1#group-latest">&lt;&lt;</a>
+                            <a class="page-link" href="/?page_latest={{ x-1 }}#group-latest">&lt;</a>
+                            <span class="page-link active">{{ n }}</span>
+                        {% else %}
+                            <a class="page-link" href="/?page_latest=1#group-latest">&lt;&lt;</a>
+                            <a class="page-link" href="/?page_latest={{ x-1 }}#group-latest">&lt;</a>
+                            <span class="page-link active">{{ x }}</span>
+                            <a class="page-link" href="/?page_latest={{ x+1 }}#group-latest">&gt;</a>
+                            <a class="page-link" href="/?page_latest={{ n }}#group-latest">&gt;&gt;</a>
+                        {% endif %}
+                    {% else %}
+                        <span class="page-link active">1</span>
+                    {% endif %}
+                </div>
+                </div>
+            </div>
+            <div class="article-group">
+                <div class="article-group-title collapsible" onclick="toggleGroup('hot')" id="group-title-hot">
+                    <span class="collapse-arrow" id="arrow-hot">&gt;</span> 热门文章
+                </div>
+                <div class="group-content" id="group-content-hot">
+                <ul class="article-list" id="group-list-hot">
+                    {% for article in hot_articles %}
+                    <li class="article-item" data-article-id="{{ article.id }}" onclick="loadArticle(parseInt(this.getAttribute('data-article-id')))">
+                        <div class="article-title">{{ article.title }}</div>
+                        <div class="article-meta">
+                            <span class="article-author">{{ article.author.nickname or article.author.username if article.author else '匿名' }}</span>
+                            <span class="article-date">{{ article.created_at.strftime('%Y-%m-%d') if article.created_at else '' }}</span>
+                        </div>
+                    </li>
+                    {% endfor %}
+                    {% if not hot_articles or hot_articles|length == 0 %}
+                    <li class="article-item disabled">
+                        <div class="article-title">暂无热门文章</div>
+                    </li>
+                    {% endif %}
+                </ul>
+                <div class="pagination-controls">
+                    {% set n = total_hot_pages %}
+                    {% set x = page_hot %}
+                    {% if n > 1 %}
+                        {% if x == 1 %}
+                            <span class="page-link active">1</span>
+                            {% if n > 1 %}
+                                <a class="page-link" href="/?page_hot={{ x+1 }}#group-hot">&gt;</a>
+                                <a class="page-link" href="/?page_hot={{ n }}#group-hot">&gt;&gt;</a>
+                            {% endif %}
+                        {% elif x == n %}
+                            <a class="page-link" href="/?page_hot=1#group-hot">&lt;&lt;</a>
+                            <a class="page-link" href="/?page_hot={{ x-1 }}#group-hot">&lt;</a>
+                            <span class="page-link active">{{ n }}</span>
+                        {% else %}
+                            <a class="page-link" href="/?page_hot=1#group-hot">&lt;&lt;</a>
+                            <a class="page-link" href="/?page_hot={{ x-1 }}#group-hot">&lt;</a>
+                            <span class="page-link active">{{ x }}</span>
+                            <a class="page-link" href="/?page_hot={{ x+1 }}#group-hot">&gt;</a>
+                            <a class="page-link" href="/?page_hot={{ n }}#group-hot">&gt;&gt;</a>
+                        {% endif %}
+                    {% else %}
+                        <span class="page-link active">1</span>
+                    {% endif %}
+                </div>
+                </div>
+            </div>
         {% endif %}
     </div>
     
@@ -65,7 +160,7 @@
                 <h1>{{ first_article.title }}</h1>
                 <div class="article-content">{{ first_article.content|safe }}</div>
                 <div class="article-meta right">
-                    {{ first_article.author.username if first_article.author else '匿名' }} • {{ first_article.created_at.strftime('%Y-%m-%d %H:%M') if first_article.created_at else '' }}
+                    {{ (first_article.author.nickname or first_article.author.username) if first_article.author else '匿名' }} • {{ first_article.created_at.strftime('%Y-%m-%d %H:%M') if first_article.created_at else '' }}
                 </div>
             </div>
         {% else %}
@@ -302,30 +397,7 @@ function initializePage() {
         }
     }
     
-    // 如果没有highlight_id，检查是否有分组页码参数
-    let groupFirstArticle = null;
-    for (const key of params.keys()) {
-        if (key.startsWith('page_')) {
-            const groupName = key.substring(5);
-            const groupList = document.getElementById('group-list-' + groupName);
-            if (groupList) {
-                const firstItemInGroup = groupList.querySelector('.article-item');
-                if (firstItemInGroup) {
-                    groupFirstArticle = firstItemInGroup;
-                    break;
-                }
-            }
-        }
-    }
-    
-    // 如果找到了分组的第一篇文章，加载它
-    if (groupFirstArticle) {
-        const groupFirstId = groupFirstArticle.getAttribute('data-article-id');
-        loadArticle(groupFirstId);
-        return;
-    }
-    
-    // 否则加载全局第一篇文章
+    // 加载当前列表第一篇文章
     const firstItem = document.querySelector('.article-item');
     if (firstItem) {
         const firstId = firstItem.getAttribute('data-article-id');
@@ -342,9 +414,11 @@ const toggleGroup = throttle(function(category) {
     if (content.style.display === 'none') {
         content.style.display = '';
         if (arrow) arrow.innerHTML = "&or;";
+        try { localStorage.setItem('group_open_' + category, '1'); } catch (e) {}
     } else {
         content.style.display = 'none';
         if (arrow) arrow.innerHTML = "&gt;";
+        try { localStorage.setItem('group_open_' + category, '0'); } catch (e) {}
     }
 }, THROTTLE_DELAY);
 
@@ -748,8 +822,13 @@ function ensureModalExists() {
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function() {
-    // 设置当前用户信息
-    currentUser = {{ user|tojson if user else 'null' }};
+    // 设置当前用户信息（以字符串形式注入，避免脚本语法问题）
+    const userJsonStr = '{{ (user|tojson)|default("null")|e }}';
+    try {
+        currentUser = JSON.parse(userJsonStr);
+    } catch (e) {
+        currentUser = null;
+    }
     
     // 延迟初始化，确保DOM完全准备好
     requestAnimationFrame(() => {
@@ -769,6 +848,24 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // 确保弹窗存在
     ensureModalExists();
+
+    // 恢复分组折叠状态（含最新/热门与分类分组）
+    try {
+        const groups = document.querySelectorAll('[id^="group-content-"]');
+        groups.forEach(function(contentEl){
+            const id = contentEl.id; // group-content-xxx
+            const category = id.substring('group-content-'.length);
+            const arrow = document.getElementById('arrow-' + category);
+            const saved = localStorage.getItem('group_open_' + category);
+            if (saved === '0') {
+                contentEl.style.display = 'none';
+                if (arrow) arrow.innerHTML = "&gt;";
+            } else {
+                contentEl.style.display = '';
+                if (arrow) arrow.innerHTML = "&or;";
+            }
+        });
+    } catch (e) {}
 });
 
 // 定期清理过期缓存

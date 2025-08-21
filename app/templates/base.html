@@ -11,16 +11,15 @@
 <body>
     <header>
         <nav>
-            <a href="/" class="logo" id="home-link">📖 雅凝书屋</a>
+            <a href="/" class="logo" id="home-link">📖 西江月</a>
             <ul class="nav-links">
                 <li><a href="/" id="nav-home-link">首页</a></li>
                 {% if user %}
+                    <li><a href="/u/{{ user.username }}/articles">我的空间</a></li>
                     <li><a href="/new">写文章</a></li>
-                    <li><a href="/history">浏览历史</a></li>
-                    <li><a href="/logout">退出</a></li>
+                    <li><a href="/profile" class="user-link">☰| {{ user.nickname or user.username }}</a></li>
                 {% else %}
-                    <li><a href="/login">登录</a></li>
-                    <li><a href="/register">注册</a></li>
+                    <li><a href="/login">登录 / 注册</a></li>
                 {% endif %}
             </ul>
         </nav>

@@ -19,7 +19,13 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 
-# models.Base.metadata.create_all(bind=deps.engine)  # 表已存在，不需要创建
+@app.on_event("startup")
+def on_startup():
+    # 启动时自动创建表（在 SQLite 初次运行时很有用）
+    models.Base.metadata.create_all(bind=deps.engine)
+
+# 保留用户名前缀，避免与系统路由冲突
+RESERVED_USERNAMES = {"u"}
 
 def group_articles_by_category(articles):
     groups = defaultdict(list)
@@ -35,7 +41,7 @@ def to_cat_id(category: str) -> str:
 # 工具函数：用户对象转dict
 def serialize_user(user):
     if user:
-        return {"id": user.id, "username": user.username}
+        return {"id": user.id, "username": user.username, "nickname": getattr(user, "nickname", None)}
     return None
 
 # 工具函数：分页分组
@@ -71,8 +77,26 @@ def is_html_content(content: str) -> bool:
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request, db: Session = Depends(deps.get_db)):
-    per_page = 5
-    grouped_data = get_grouped_data(db, request, per_page)
+    # 推荐数据分页
+    per_page_latest = int(request.query_params.get('page_latest_size', 10))
+    page_latest = int(request.query_params.get('page_latest', 1))
+    per_page_hot = int(request.query_params.get('page_hot_size', 10))
+    page_hot = int(request.query_params.get('page_hot', 1))
+
+    skip_latest = (page_latest - 1) * per_page_latest
+    skip_hot = (page_hot - 1) * per_page_hot
+
+    latest_articles = crud.get_articles(db, skip=skip_latest, limit=per_page_latest)
+    hot_rows = crud.get_hot_articles_by_comments_paginated(db, skip=skip_hot, limit=per_page_hot)
+    hot_articles = [row[0] for row in hot_rows]
+
+    total_latest = crud.get_articles_count(db)
+    # 热门总数等同于文章总数（评论聚合后仍是文章集合）
+    total_hot = total_latest
+    total_latest_pages = (total_latest + per_page_latest - 1) // per_page_latest
+    total_hot_pages = (total_hot + per_page_hot - 1) // per_page_hot
+
+    # 右侧默认展示第一篇（优先highlight）
     first_article = None
     highlight_id = request.query_params.get('highlight_id')
     if highlight_id:
@@ -83,21 +107,29 @@ def index(request: Request, db: Session = Depends(deps.get_db)):
         except (ValueError, TypeError):
             pass
     if not first_article:
-        for group in grouped_data:
-            if group["articles"]:
-                first_article = group["articles"][0]
-                break
+        if latest_articles:
+            first_article = latest_articles[0]
+        elif hot_articles:
+            first_article = hot_articles[0]
+
     user = get_current_user_from_cookie(request, db)
     user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
     user_dict = serialize_user(user)
     response = templates.TemplateResponse("index.html", {
         "request": request,
         "user": user_dict,
-        "grouped_data": grouped_data,
+        "latest_articles": latest_articles,
+        "hot_articles": hot_articles,
+        "page_latest": page_latest,
+        "total_latest_pages": total_latest_pages,
+        "page_hot": page_hot,
+        "total_hot_pages": total_hot_pages,
         "first_article": first_article,
     })
     response.headers["Content-Type"] = "text/html; charset=utf-8"
     return response
+
+ 
 
 @app.get("/register", response_class=HTMLResponse)
 def register_page(request: Request):
@@ -106,12 +138,16 @@ def register_page(request: Request):
     return response
 
 @app.post("/register")
-def register(request: Request, username: str = Form(...), password: str = Form(...), db: Session = Depends(deps.get_db)):
+def register(request: Request, username: str = Form(...), password: str = Form(...), nickname: str = Form(None), db: Session = Depends(deps.get_db)):
+    if username in RESERVED_USERNAMES:
+        response = templates.TemplateResponse("register.html", {"request": request, "msg": "该用户名被系统保留，请更换"})
+        response.headers["Content-Type"] = "text/html; charset=utf-8"
+        return response
     if crud.get_user_by_username(db, username):
         response = templates.TemplateResponse("register.html", {"request": request, "msg": "用户名已存在"})
         response.headers["Content-Type"] = "text/html; charset=utf-8"
         return response
-    crud.create_user(db, schemas.UserCreate(username=username, password=password))
+    crud.create_user(db, schemas.UserCreate(username=username, password=password, nickname=nickname))
     return RedirectResponse("/login", status_code=302)
 
 @app.get("/login", response_class=HTMLResponse)
@@ -128,6 +164,55 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
     response.set_cookie("access_token", token, httponly=True)
     return response
 
+ 
+
+@app.get("/u/{username}/articles", response_class=HTMLResponse)
+def user_articles(username: str, request: Request, db: Session = Depends(deps.get_db)):
+    author = crud.get_user_by_username(db, username)
+    if not author:
+        return RedirectResponse("/", status_code=302)
+    per_page = 5
+    categories = [row[0] for row in db.query(models.Article.category).filter(models.Article.author_id == author.id).distinct().all()]
+    grouped_data = []
+    for category in categories:
+        cat_id = to_cat_id(category)
+        page_param = f"page_{cat_id}"
+        current_page = int(request.query_params.get(page_param, 1))
+        skip = (current_page - 1) * per_page
+        articles = crud.get_user_articles_by_category(db, author.id, category, skip=skip, limit=per_page)
+        total_articles = crud.get_user_articles_count_by_category(db, author.id, category)
+        total_pages = (total_articles + per_page - 1) // per_page
+        start_page = max(1, current_page - 2)
+        end_page = min(total_pages, current_page + 2)
+        page_numbers = list(range(start_page, end_page + 1))
+        grouped_data.append({
+            "category": category,
+            "articles": articles,
+            "current_page": current_page,
+            "total_pages": total_pages,
+            "total_articles": total_articles,
+            "page_numbers": page_numbers,
+            "start_page": start_page,
+            "end_page": end_page,
+        })
+    first_article = None
+    for group in grouped_data:
+        if group["articles"]:
+            first_article = group["articles"][0]
+            break
+    current_user = get_current_user_from_cookie(request, db)
+    user_dict = serialize_user(current_user)
+    response = templates.TemplateResponse("index.html", {
+        "request": request,
+        "user": user_dict,
+        "grouped_data": grouped_data,
+        "first_article": first_article,
+    })
+    response.headers["Content-Type"] = "text/html; charset=utf-8"
+    return response
+
+ 
+
 def get_current_user_from_cookie(request: Request, db: Session = Depends(deps.get_db)):
     token = request.cookies.get("access_token")
     if not token:
@@ -142,6 +227,61 @@ def logout():
     response = RedirectResponse("/", status_code=302)
     response.delete_cookie("access_token")
     return response
+
+@app.get("/profile", response_class=HTMLResponse)
+def profile_page(request: Request, db: Session = Depends(deps.get_db)):
+    user = get_current_user_from_cookie(request, db)
+    if not user:
+        return RedirectResponse("/login", status_code=302)
+    user_dict = serialize_user(user)
+    # 统计信息
+    articles_count = db.query(models.Article).filter(models.Article.author_id == user.id).count()
+    comments_count = db.query(models.Comment).filter(models.Comment.user_id == user.id).count()
+    first_article = (
+        db.query(models.Article)
+        .filter(models.Article.author_id == user.id)
+        .order_by(models.Article.created_at.asc())
+        .first()
+    )
+    since = first_article.created_at.strftime('%Y-%m-%d') if first_article and first_article.created_at else ""
+    return templates.TemplateResponse("profile.html", {
+        "request": request,
+        "user": user_dict,
+        "stats": {
+            "articles_count": articles_count,
+            "comments_count": comments_count,
+            "since": since,
+        },
+    })
+
+@app.post("/profile", response_class=HTMLResponse)
+def update_profile(request: Request, nickname: str = Form(None), db: Session = Depends(deps.get_db)):
+    user = get_current_user_from_cookie(request, db)
+    if not user:
+        return RedirectResponse("/login", status_code=302)
+    crud.update_user_nickname(db, user.id, nickname)
+    user = get_current_user_from_cookie(request, db)
+    user_dict = serialize_user(user)
+    # 统计信息与 GET /profile 保持一致
+    articles_count = db.query(models.Article).filter(models.Article.author_id == user.id).count()
+    comments_count = db.query(models.Comment).filter(models.Comment.user_id == user.id).count()
+    first_article = (
+        db.query(models.Article)
+        .filter(models.Article.author_id == user.id)
+        .order_by(models.Article.created_at.asc())
+        .first()
+    )
+    since = first_article.created_at.strftime('%Y-%m-%d') if first_article and first_article.created_at else ""
+    return templates.TemplateResponse("profile.html", {
+        "request": request,
+        "user": user_dict,
+        "msg": "已保存",
+        "stats": {
+            "articles_count": articles_count,
+            "comments_count": comments_count,
+            "since": since,
+        },
+    })
 
 @app.get("/article/{article_id}", response_class=HTMLResponse)
 def read_article(request: Request, article_id: int, db: Session = Depends(deps.get_db)):
@@ -203,8 +343,12 @@ def edit_article(request: Request, article_id: int, title: str = Form(...), cont
 
 @app.get("/new", response_class=HTMLResponse)
 def new_article_page(request: Request, db: Session = Depends(deps.get_db)):
+    user = get_current_user_from_cookie(request, db)
+    if not user:
+        return RedirectResponse("/login", status_code=302)
+    user_dict = serialize_user(user)
     categories = [row[0] for row in db.query(models.Article.category).distinct().all()]
-    return templates.TemplateResponse("new_article.html", {"request": request, "categories": categories})
+    return templates.TemplateResponse("new_article.html", {"request": request, "categories": categories, "user": user_dict})
 
 @app.post("/new")
 def new_article(request: Request, title: str = Form(...), content: str = Form(...), category: str = Form("未分类"), db: Session = Depends(deps.get_db)):
@@ -228,6 +372,7 @@ def get_article_content(article_id: int, request: Request, db: Session = Depends
     
     user = get_current_user_from_cookie(request, db)
     user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
+    # 浏览历史功能已移除
     can_edit = user_id == int(article.author_id) if article.author else False
     
     # 返回原始内容，不进行HTML转义
@@ -237,42 +382,13 @@ def get_article_content(article_id: int, request: Request, db: Session = Depends
         "id": article.id,
         "title": article.title,
         "content": content,
-        "author": article.author.username if article.author else "匿名",
+        "author": (article.author.nickname if (article.author and getattr(article.author, "nickname", None)) else (article.author.username if article.author else "匿名")),
         "author_id": article.author_id,
         "created_at": article.created_at.strftime('%Y-%m-%d %H:%M') if article.created_at else "",
         "can_edit": can_edit
     }
 
-@app.get("/history", response_class=HTMLResponse)
-def view_history(request: Request, db: Session = Depends(deps.get_db)):
-    user = get_current_user_from_cookie(request, db)
-    if not user:
-        return RedirectResponse("/login", status_code=302)
-    user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
-    records = crud.get_view_records(db, user_id)
-    # 分组历史记录中的文章
-    from collections import defaultdict
-    groups = defaultdict(list)
-    for r in records:
-        article = r.article
-        if article:
-            groups[article.category or "未分类"].append(article)
-    grouped_data = []
-    for category, articles in groups.items():
-        cat_id = to_cat_id(category)
-        grouped_data.append({
-            "category": category,
-            "articles": articles,
-            "current_page": 1,
-            "total_pages": 1,
-            "total_articles": len(articles),
-            "page_numbers": [1],
-            "start_page": 1,
-            "end_page": 1,
-        })
-    first_article = grouped_data[0]["articles"][0] if grouped_data and grouped_data[0]["articles"] else None
-    user_dict = serialize_user(user)
-    return templates.TemplateResponse("index.html", {"request": request, "grouped_data": grouped_data, "first_article": first_article, "user": user_dict, "history": True})
+ 
 
 @app.post("/article/{article_id}/delete")
 def delete_article(article_id: int, request: Request, db: Session = Depends(deps.get_db)):
@@ -354,7 +470,7 @@ def get_comments(article_id: int, db: Session = Depends(deps.get_db)):
             "id": comment.id,
             "content": comment.content,
             "created_at": comment.created_at.strftime('%Y-%m-%d %H:%M'),
-            "user": {"id": comment.user.id, "username": comment.user.username} if comment.user else None,
+            "user": {"id": comment.user.id, "username": comment.user.username, "nickname": getattr(comment.user, "nickname", None)} if comment.user else None,
             "anonymous_name": comment.anonymous_name,
             "parent_id": comment.parent_id,
             "replies": replies  # 直接使用返回的字典列表

@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card profile-card">
+    {% set display_name = user.nickname or user.username %}
+    {% set initial = (display_name)[0]|upper %}
+
+    <div class="profile-header">
+        <div class="avatar">{{ initial }}</div>
+        <div class="profile-title">
+            <div class="name">{{ display_name }}</div>
+            <div class="sub">@{{ user.username }}</div>
+        </div>
+        <div class="profile-actions">
+            <button type="button" class="btn btn-primary" onclick="enterEdit()">编辑资料</button>
+            <form method="get" action="/logout" class="logout-form">
+                <button type="submit" class="btn btn-secondary">退出登录</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="view-mode" class="profile-body">
+        <div class="info-stack">
+            <div class="info-item">
+                <div class="info-label">用户名</div>
+                <div class="info-value">{{ user.username }}</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">昵称</div>
+                <div class="info-value" id="nickname-text">{{ user.nickname or '—' }}</div>
+            </div>
+
+            <div class="info-item stats">
+                <div class="stats-row">
+                    <div class="stat"><span class="stat-num">{{ stats.articles_count }}</span><span class="stat-label">文章</span></div>
+                    <div class="stat-sep"></div>
+                    <div class="stat"><span class="stat-num">{{ stats.comments_count }}</span><span class="stat-label">评论</span></div>
+                    <div class="stat-sep"></div>
+                    <div class="stat"><span class="stat-num">{{ stats.since or '—' }}</span><span class="stat-label">加入时间</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <form id="edit-mode" method="post" class="profile-edit" style="display: none;">
+        <div class="form-row">
+            <label>用户名</label>
+            <input type="text" class="form-control" value="{{ user.username }}" disabled>
+        </div>
+        <div class="form-row">
+            <label for="nickname">昵称</label>
+            <input type="text" id="nickname" name="nickname" class="form-control" value="{{ user.nickname or '' }}" placeholder="填写一个你喜欢的称呼">
+        </div>
+        <div class="edit-actions">
+            <button type="submit" class="btn btn-primary">保存</button>
+            <button type="button" class="btn btn-secondary" onclick="cancelEdit()">取消</button>
+        </div>
+    </form>
+
+    {% if msg %}
+    <div class="save-tip">{{ msg }}</div>
+    {% endif %}
+</div>
+
+<script>
+(function(){
+  var view = document.getElementById('view-mode');
+  var edit = document.getElementById('edit-mode');
+  var nicknameInput = document.getElementById('nickname');
+  var initialNickname = nicknameInput ? nicknameInput.value : '';
+
+  window.enterEdit = function() {
+    if (edit) edit.style.display = '';
+    if (view) view.style.display = 'none';
+    if (nicknameInput) nicknameInput.focus();
+  };
+  window.cancelEdit = function() {
+    if (nicknameInput) nicknameInput.value = initialNickname;
+    if (edit) edit.style.display = 'none';
+    if (view) view.style.display = '';
+  };
+})();
+</script>
+
+<style>
+.profile-card { padding: 0; overflow: hidden; }
+.profile-header {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    padding: 1rem 1.25rem;
+    background: linear-gradient(135deg, rgba(16,185,129,.08), rgba(59,130,246,.05));
+    border-bottom: 1px solid rgba(16,185,129,.12);
+}
+.avatar {
+    width: 52px; height: 52px; border-radius: 50%; flex-shrink: 0;
+    background: #10b981; color: #ffffff; display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 1.1rem; box-shadow: 0 6px 16px rgba(16,185,129,.2);
+}
+.profile-title { margin-left: .5rem; flex: 1; min-width: 0; }
+.name { font-size: 1.15rem; font-weight: 700; color: #065f46; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sub { font-size: .9rem; color: #6b7280; margin-top: 2px; }
+.profile-actions { display: flex; gap: .5rem; flex-wrap: wrap; justify-content: flex-end; }
+.logout-form { margin: 0; }
+
+.profile-body { padding: 1rem 1.25rem; }
+.info-stack { display: flex; flex-direction: column; gap: .8rem; }
+.info-item { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: .8rem .9rem; }
+.info-label { font-size: .85rem; color: #6b7280; margin-bottom: .3rem; }
+.info-value { font-size: 1.05rem; color: #064e3b; font-weight: 600; }
+
+.info-item.stats { padding: .6rem .8rem; }
+.stats-row { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; }
+.stat { display: flex; align-items: baseline; gap: .35rem; }
+.stat-num { font-size: 1.05rem; font-weight: 700; color: #065f46; }
+.stat-label { font-size: .85rem; color: #6b7280; }
+.stat-sep { width: 1px; height: 16px; background: #e5e7eb; }
+
+.profile-edit { padding: 1rem 1.25rem; border-top: 1px dashed rgba(16,185,129,.2); }
+.form-row { display: flex; flex-direction: column; gap: .4rem; margin-bottom: .9rem; }
+.form-row label { color: #065f46; font-weight: 600; }
+.form-control { padding: .6rem .75rem; border: 1px solid #d1d5db; border-radius: 8px; }
+.form-control:focus { outline: none; border-color: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,.15); }
+.edit-actions { display: flex; gap: .5rem; margin-top: .25rem; }
+
+.save-tip { margin: .25rem 1.25rem 1rem; color: #059669; font-weight: 600; }
+</style>
+{% endblock %}
+
+

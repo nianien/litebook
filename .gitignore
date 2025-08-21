@@ -111,3 +111,6 @@ celerybeat.pid
 
 # Local development
 local_settings.py
+/cookies.txt
+/litebook.db-shm
+/litebook.db-wal

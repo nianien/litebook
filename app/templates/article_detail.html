@@ -17,7 +17,7 @@
                         <li class="article-item{% if article_item.id == article.id %} active{% endif %}" data-article-id="{{ article_item.id }}" onclick="loadArticle({{ article_item.id }})">
                             <div class="article-title">{{ article_item.title }}</div>
                             <div class="article-meta">
-                                {{ article_item.author.username if article_item.author else '匿名' }} • {{ article_item.created_at.strftime('%Y-%m-%d %H:%M') if article_item.created_at else '' }}
+                                {{ (article_item.author.nickname or article_item.author.username) if article_item.author else '匿名' }} • {{ article_item.created_at.strftime('%Y-%m-%d %H:%M') if article_item.created_at else '' }}
                             </div>
                         </li>
                         {% endfor %}
@@ -74,7 +74,7 @@
             </div>
             
             <div class="article-meta right">
-                {{ article.author.username if article.author else '匿名' }} • {{ article.created_at.strftime('%Y-%m-%d %H:%M') if article.created_at else '' }}
+                {{ (article.author.nickname or article.author.username) if article.author else '匿名' }} • {{ article.created_at.strftime('%Y-%m-%d %H:%M') if article.created_at else '' }}
             </div>
         </div>
         

@@ -1,7 +1,9 @@
 from sqlalchemy.orm import Session
+from datetime import datetime
 from . import models, schemas
 from passlib.context import CryptContext
 from typing import Optional
+from sqlalchemy import func, desc
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -10,11 +12,20 @@ def get_user_by_username(db: Session, username: str):
 
 def create_user(db: Session, user: schemas.UserCreate):
     hashed_password = pwd_context.hash(user.password)
-    db_user = models.User(username=user.username, hashed_password=hashed_password)
+    db_user = models.User(username=user.username, hashed_password=hashed_password, nickname=user.nickname)
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
     return db_user
+
+def update_user_nickname(db: Session, user_id: int, nickname: str | None):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        return None
+    user.nickname = nickname
+    db.commit()
+    db.refresh(user)
+    return user
 
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -53,20 +64,66 @@ def delete_article(db: Session, article_id: int):
     return db_article
 
 def add_view_record(db: Session, user_id: int, article_id: int):
-    record = models.ViewRecord(user_id=user_id, article_id=article_id)
-    db.add(record)
-    db.commit()
-    db.refresh(record)
-    return record
+    # 已废弃：浏览历史功能移除
+    return None
 
 def get_view_records(db: Session, user_id: int):
-    return db.query(models.ViewRecord).filter(models.ViewRecord.user_id == user_id).order_by(models.ViewRecord.viewed_at.desc()).all()
+    # 已废弃：浏览历史功能移除
+    return []
 
 def get_articles_by_category(db: Session, category: str, skip=0, limit=10):
     return db.query(models.Article).filter(models.Article.category == category).order_by(models.Article.created_at.desc()).offset(skip).limit(limit).all()
 
 def get_articles_count_by_category(db: Session, category: str):
     return db.query(models.Article).filter(models.Article.category == category).count()
+
+# 首页推荐 - 最新文章
+def get_latest_articles(db: Session, limit: int = 10):
+    return (
+        db.query(models.Article)
+        .order_by(models.Article.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+# 首页推荐 - 热门文章（按评论数倒序，其次按发布时间倒序）
+def get_hot_articles_by_comments(db: Session, limit: int = 10):
+    return (
+        db.query(models.Article, func.count(models.Comment.id).label("comment_count"))
+        .outerjoin(models.Comment, models.Comment.article_id == models.Article.id)
+        .group_by(models.Article.id)
+        .order_by(desc("comment_count"), models.Article.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+def get_hot_articles_by_comments_paginated(db: Session, skip: int = 0, limit: int = 10):
+    return (
+        db.query(models.Article, func.count(models.Comment.id).label("comment_count"))
+        .outerjoin(models.Comment, models.Comment.article_id == models.Article.id)
+        .group_by(models.Article.id)
+        .order_by(desc("comment_count"), models.Article.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+def get_user_articles_by_category(db: Session, author_id: int, category: str, skip=0, limit=10):
+    return (
+        db.query(models.Article)
+        .filter(models.Article.author_id == author_id, models.Article.category == category)
+        .order_by(models.Article.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+def get_user_articles_count_by_category(db: Session, author_id: int, category: str):
+    return (
+        db.query(models.Article)
+        .filter(models.Article.author_id == author_id, models.Article.category == category)
+        .count()
+    )
 
 # 评论相关CRUD操作
 def create_comment(db: Session, comment: schemas.CommentCreate, user_id: Optional[int] = None):
