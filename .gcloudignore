@@ -1,0 +1,97 @@
+# ========================================
+# Google Cloud 部署忽略文件
+# ========================================
+
+# 版本控制
+.git/
+.gitignore
+.gitattributes
+
+# Python 相关
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# 虚拟环境
+.venv/
+venv/
+ENV/
+env/
+
+# 开发工具配置
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+.python-version
+Pipfile.lock
+poetry.lock
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# 测试和开发文件
+test/
+*.log
+*.tmp
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# 环境变量和敏感信息
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+credentials.json
+service-account-key.json
+*.pem
+*.key
+
+# Google Cloud 相关
+gcloud/
+.cookies.txt
+
+# 文档
+README.md
+readme.md
+*.md
+docs/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# 本地开发文件
+local_settings.py
+
+# 其他临时文件
+*.bak
+*.orig
+*.rej
+
+# ========================================
+# 重要：数据库文件处理
+# ========================================
+# 排除 SQLite 的临时文件（WAL/SHM）
+*.db-wal
+*.db-shm
+
+# 注意：litebook.db 将被包含在部署中
+# 如果需要排除数据库文件，请取消注释下面这行：
+# *.db 

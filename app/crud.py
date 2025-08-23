@@ -157,11 +157,21 @@ def get_comment_replies(db: Session, comment_id: int):
         
         result = []
         for reply in replies:
+            # 优先显示昵称，如果没有昵称则显示用户名
+            user_display_name = None
+            if reply.user:
+                user_display_name = reply.user.nickname or reply.user.username
+            
             reply_data = {
                 "id": reply.id,
                 "content": reply.content,
                 "created_at": reply.created_at.strftime('%Y-%m-%d %H:%M'),
-                "user": {"id": reply.user.id, "username": reply.user.username} if reply.user else None,
+                "user": {
+                    "id": reply.user.id, 
+                    "username": reply.user.username,
+                    "nickname": reply.user.nickname,
+                    "display_name": user_display_name  # 添加显示名称字段
+                } if reply.user else None,
                 "anonymous_name": reply.anonymous_name,
                 "parent_id": reply.parent_id,
                 "replies": get_replies_recursive(reply.id)  # 递归获取嵌套回复

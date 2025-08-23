@@ -541,7 +541,8 @@ function displayComments(comments) {
 }
 
 function createCommentHTML(comment) {
-    const authorName = comment.user ? comment.user.username : (comment.anonymous_name || '匿名用户');
+    // 优先使用 display_name，如果没有则使用 username 或 anonymous_name
+    const authorName = comment.user ? (comment.user.display_name || comment.user.username) : (comment.anonymous_name || '匿名用户');
     const canDelete = (comment.user && currentUser && comment.user.id === currentUser.id) || 
                      (currentUser && currentUser.id === currentArticleAuthorId);
     
@@ -577,7 +578,8 @@ function createCommentHTML(comment) {
 }
 
 function createReplyHTML(reply) {
-    const authorName = reply.user ? reply.user.username : (reply.anonymous_name || '匿名用户');
+    // 优先使用 display_name，如果没有则使用 username 或 anonymous_name
+    const authorName = reply.user ? (reply.user.display_name || reply.user.username) : (reply.anonymous_name || '匿名用户');
     const canDelete = (reply.user && currentUser && reply.user.id === currentUser.id) || 
                      (currentUser && currentUser.id === currentArticleAuthorId);
     

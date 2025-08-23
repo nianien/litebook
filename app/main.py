@@ -466,11 +466,22 @@ def get_comments(article_id: int, db: Session = Depends(deps.get_db)):
     for comment in comments:
         # 获取回复（现在返回的是字典列表）
         replies = crud.get_comment_replies(db, comment.id)
+        
+        # 优先显示昵称，如果没有昵称则显示用户名
+        user_display_name = None
+        if comment.user:
+            user_display_name = comment.user.nickname or comment.user.username
+        
         comment_data = {
             "id": comment.id,
             "content": comment.content,
             "created_at": comment.created_at.strftime('%Y-%m-%d %H:%M'),
-            "user": {"id": comment.user.id, "username": comment.user.username, "nickname": getattr(comment.user, "nickname", None)} if comment.user else None,
+            "user": {
+                "id": comment.user.id, 
+                "username": comment.user.username, 
+                "nickname": comment.user.nickname,
+                "display_name": user_display_name  # 添加显示名称字段
+            } if comment.user else None,
             "anonymous_name": comment.anonymous_name,
             "parent_id": comment.parent_id,
             "replies": replies  # 直接使用返回的字典列表
@@ -516,11 +527,21 @@ def create_comment(
     user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
     comment = crud.create_comment(db, comment_data, user_id)
     
+    # 优先显示昵称，如果没有昵称则显示用户名
+    user_display_name = None
+    if comment.user:
+        user_display_name = comment.user.nickname or comment.user.username
+    
     response = JSONResponse(content={
         "id": comment.id,
         "content": comment.content,
         "created_at": comment.created_at.strftime('%Y-%m-%d %H:%M'),
-        "user": {"id": comment.user.id, "username": comment.user.username} if comment.user else None,
+        "user": {
+            "id": comment.user.id, 
+            "username": comment.user.username,
+            "nickname": comment.user.nickname,
+            "display_name": user_display_name  # 添加显示名称字段
+        } if comment.user else None,
         "anonymous_name": comment.anonymous_name,
         "parent_id": comment.parent_id
     })

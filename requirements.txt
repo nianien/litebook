@@ -5,6 +5,4 @@ python-dotenv
 passlib[bcrypt]
 python-jose[cryptography]
 jinja2
-aiofiles
 python-multipart
-email-validator

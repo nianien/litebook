@@ -63,6 +63,7 @@ docker buildx build \
 
 # 远程构建(建议)
 ```shell
+#执行 gcloud builds submit ... 会上传你当前目录的代码（和 Dockerfile）到 Cloud Build，不需要 Git commit，但推荐保持代码干净，并用 .dockerignore 控制上传内容
 gcloud builds submit \
   --tag asia-east1-docker.pkg.dev/nianien/litebook/litebook-app:latest .
 ```
