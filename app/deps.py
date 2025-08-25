@@ -16,6 +16,9 @@ GCS_MOUNT = Path("/mnt/gcs")
 LOCAL_DB = Path("./litebook.db")
 CHECKSUM_FILE = Path("./db_checksum.json")
 
+# 添加同步标志，避免重复执行
+_sync_executed = False
+
 def get_file_checksum(file_path):
     """获取文件的校验信息"""
     if not file_path.exists():
@@ -47,7 +50,7 @@ def load_checksum():
         print(f"❌ 加载校验信息失败: {e}")
     return None
 
-def copy_from_gcs():
+def copy_from_gcs_if_needed():
     """从 GCS 复制数据库文件到本地（如果存在）"""
     if not GCS_MOUNT.exists():
         print("❌ GCS 挂载点不存在: /mnt/gcs")
@@ -79,6 +82,13 @@ def copy_from_gcs():
 
 def sync_to_gcs():
     """将本地数据库同步到 GCS"""
+    global _sync_executed
+    
+    # 避免重复执行
+    if _sync_executed:
+        print("✅ 数据同步已执行，跳过重复调用")
+        return
+    
     # 检查 GCS 挂载
     if not GCS_MOUNT.exists():
         print("❌ GCS 挂载点不存在: /mnt/gcs")
@@ -115,33 +125,19 @@ def sync_to_gcs():
         print("❌ 无法获取当前文件校验信息")
         return
     
-    # 检查 WAL 文件状态
-    wal_file = LOCAL_DB.with_suffix('.db-wal')
-    wal_size = wal_file.stat().st_size if wal_file.exists() else 0
-    
-    print(f"📊 文件状态检查:")
-    print(f"  保存的校验: {saved_checksum['size']:,} 字节, 修改时间: {saved_checksum['mtime']}")
-    print(f"  当前文件:  {current_checksum['size']:,} 字节, 修改时间: {current_checksum['mtime']}")
-    print(f"  WAL文件大小: {wal_size:,} 字节")
-    
-    # 判断是否需要同步
+    # 检查数据库文件是否有变化
     db_changed = (current_checksum["size"] != saved_checksum["size"] or 
                   current_checksum["mtime"] != saved_checksum["mtime"])
     
-    if not db_changed and wal_size <= 1024:  # WAL 文件很小或不存在
-        print("✅ 数据库文件无变化，WAL 已合并，无需同步")
+    if not db_changed:
+        print("✅ 数据库文件无变化，无需同步")
         return
-    
-    if db_changed:
-        print("🔄 检测到数据库文件变化，需要同步")
-    elif wal_size > 1024:
-        print("🔄 检测到 WAL 文件有数据，需要同步")
-    
+
     gcs_db = GCS_MOUNT / "litebook.db"
     try:
         # 同步数据库到 GCS
         print("🔄 同步数据库到 GCS...")
-        shutil.copy2(LOCAL_DB, gcs_db)
+        shutil.copyfile(LOCAL_DB, gcs_db)  # 只复制内容，不做 copystat
         
         # 同步完成后，更新校验信息
         print("🔄 更新校验信息...")
@@ -170,7 +166,7 @@ def register_shutdown_hooks():
     print("✅ 已注册数据同步钩子函数")
 
 # Startup actions
-copy_from_gcs()
+copy_from_gcs_if_needed()
 register_shutdown_hooks()
 
 # 数据库连接配置 - 始终使用本地文件

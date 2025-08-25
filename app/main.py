@@ -214,6 +214,7 @@ def user_articles(username: str, request: Request, db: Session = Depends(deps.ge
         "user": user_dict,
         "grouped_data": grouped_data,
         "first_article": first_article,
+        "base_url": f"/u/{username}/articles",
     })
     response.headers["Content-Type"] = "text/html; charset=utf-8"
     return response

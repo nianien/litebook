@@ -31,19 +31,19 @@
                             {% if x == 1 %}
                                 <span class="page-link active">1</span>
                                 {% if n > 1 %}
-                                    <a class="page-link" href="/?page_{{ cat }}={{ x+1 }}#group-{{ cat }}">&gt;</a>
-                                    <a class="page-link" href="/?page_{{ cat }}={{ n }}#group-{{ cat }}">&gt;&gt;</a>
+                                    <a class="page-link" href="{{ (base_url or '/') }}?page_{{ cat }}={{ x+1 }}&default_group={{ cat }}#group-{{ cat }}">&gt;</a>
+                                    <a class="page-link" href="{{ (base_url or '/') }}?page_{{ cat }}={{ n }}&default_group={{ cat }}#group-{{ cat }}">&gt;&gt;</a>
                                 {% endif %}
                             {% elif x == n %}
-                                <a class="page-link" href="/?page_{{ cat }}=1#group-{{ cat }}">&lt;&lt;</a>
-                                <a class="page-link" href="/?page_{{ cat }}={{ x-1 }}#group-{{ cat }}">&lt;</a>
+                                <a class="page-link" href="{{ (base_url or '/') }}?page_{{ cat }}=1&default_group={{ cat }}#group-{{ cat }}">&lt;&lt;</a>
+                                <a class="page-link" href="{{ (base_url or '/') }}?page_{{ cat }}={{ x-1 }}&default_group={{ cat }}#group-{{ cat }}">&lt;</a>
                                 <span class="page-link active">{{ n }}</span>
                             {% else %}
-                                <a class="page-link" href="/?page_{{ cat }}=1#group-{{ cat }}">&lt;&lt;</a>
-                                <a class="page-link" href="/?page_{{ cat }}={{ x-1 }}#group-{{ cat }}">&lt;</a>
+                                <a class="page-link" href="{{ (base_url or '/') }}?page_{{ cat }}=1&default_group={{ cat }}#group-{{ cat }}">&lt;&lt;</a>
+                                <a class="page-link" href="{{ (base_url or '/') }}?page_{{ cat }}={{ x-1 }}&default_group={{ cat }}#group-{{ cat }}">&lt;</a>
                                 <span class="page-link active">{{ x }}</span>
-                                <a class="page-link" href="/?page_{{ cat }}={{ x+1 }}#group-{{ cat }}">&gt;</a>
-                                <a class="page-link" href="/?page_{{ cat }}={{ n }}#group-{{ cat }}">&gt;&gt;</a>
+                                <a class="page-link" href="{{ (base_url or '/') }}?page_{{ cat }}={{ x+1 }}&default_group={{ cat }}#group-{{ cat }}">&gt;</a>
+                                <a class="page-link" href="{{ (base_url or '/') }}?page_{{ cat }}={{ n }}&default_group={{ cat }}#group-{{ cat }}">&gt;&gt;</a>
                             {% endif %}
                         {% else %}
                             <span class="page-link active">1</span>
@@ -387,6 +387,7 @@ function updateArticleDisplay(data) {
 function initializePage() {
     const params = new URLSearchParams(window.location.search);
     const highlightId = params.get('highlight_id');
+    const defaultGroup = params.get('default_group');
     
     // 如果有highlight_id参数，优先加载指定文章
     if (highlightId) {
@@ -397,7 +398,20 @@ function initializePage() {
         }
     }
     
-    // 加载当前列表第一篇文章
+    // 若指定默认分组，优先加载该分组的第一篇文章
+    if (defaultGroup) {
+        const groupList = document.getElementById('group-list-' + defaultGroup);
+        if (groupList) {
+            const firstInGroup = groupList.querySelector('.article-item');
+            if (firstInGroup) {
+                const firstId = firstInGroup.getAttribute('data-article-id');
+                loadArticle(firstId);
+                return;
+            }
+        }
+    }
+
+    // 兜底：加载页面中的第一篇文章
     const firstItem = document.querySelector('.article-item');
     if (firstItem) {
         const firstId = firstItem.getAttribute('data-article-id');
