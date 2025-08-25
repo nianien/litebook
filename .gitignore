@@ -50,10 +50,7 @@ sqlite_history
 
 # Environment variables and secrets
 .env
-.env.local
-.env.development
-.env.test
-.env.production
+.env.*
 credentials.json
 service-account-key.json
 *.pem

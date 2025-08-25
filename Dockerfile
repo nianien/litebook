@@ -17,13 +17,10 @@ RUN pip install --upgrade pip
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade --root-user-action=ignore -r requirements.txt
 
-# 复制项目代码（不包含__pycache__，通过.dockerignore实现）
+# 复制项目代码（不包含__pycache__，通过.dockerignore/.gcloudignore实现）
 COPY . .
 
-# 直接复制已初始化的 SQLite 数据库文件
-COPY litebook.db /app/litebook.db
-
-# 确保数据库文件权限正确
+# 确保应用代码权限正确
 RUN chown -R appuser:appuser /app
 
 # 切换到非root用户

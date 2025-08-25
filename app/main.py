@@ -24,6 +24,13 @@ def on_startup():
     # 启动时自动创建表（在 SQLite 初次运行时很有用）
     models.Base.metadata.create_all(bind=deps.engine)
 
+@app.on_event("shutdown")
+def on_shutdown():
+    """应用关闭时同步数据到 GCS"""
+    print("🔄 应用正在关闭，同步数据到 GCS...")
+    deps.sync_to_gcs()
+    print("✅ 数据同步完成，应用关闭")
+
 # 保留用户名前缀，避免与系统路由冲突
 RESERVED_USERNAMES = {"u"}
 

@@ -54,10 +54,7 @@ Thumbs.db
 
 # 环境变量和敏感信息
 .env
-.env.local
-.env.development
-.env.test
-.env.production
+.env.*
 credentials.json
 service-account-key.json
 *.pem
@@ -85,13 +82,7 @@ local_settings.py
 *.orig
 *.rej
 
-# ========================================
-# 重要：数据库文件处理
-# ========================================
-# 排除 SQLite 的临时文件（WAL/SHM）
+# 排除 SQLite 相关文件（WAL/SHM）
 *.db-wal
 *.db-shm
-
-# 注意：litebook.db 将被包含在部署中
-# 如果需要排除数据库文件，请取消注释下面这行：
-# *.db 
+*.db
