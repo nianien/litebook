@@ -8,6 +8,8 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from . import models, schemas, crud, auth, deps
+from .sync import register_lifecycle
+from app.deps import stop_writers, resume_writers
 
 app = FastAPI(
     title="LiteBlog",
@@ -19,20 +21,17 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 
-@app.on_event("startup")
-def on_startup():
-    # 启动时自动创建表（在 SQLite 初次运行时很有用）
-    models.Base.metadata.create_all(bind=deps.engine)
-
-@app.on_event("shutdown")
-def on_shutdown():
-    """应用关闭时同步数据到 GCS"""
-    print("🔄 应用正在关闭，同步数据到 GCS...")
-    deps.sync_to_gcs()
-    print("✅ 数据同步完成，应用关闭")
+# 注册：把暂停/恢复写入回调交给 sync.py
+register_lifecycle(
+    app,
+    stop_writers_cb=lambda: stop_writers(1.0),  # 暂停窗口给 1s 让在途事务收尾
+    resume_writers_cb=resume_writers,
+    enable_periodic=True,
+)
 
 # 保留用户名前缀，避免与系统路由冲突
 RESERVED_USERNAMES = {"u"}
+
 
 def group_articles_by_category(articles):
     groups = defaultdict(list)
@@ -41,15 +40,19 @@ def group_articles_by_category(articles):
         groups[key].append(article)
     return sorted(groups.items())
 
+
 # 工具函数：分类名转cat_id
 def to_cat_id(category: str) -> str:
-    return category.replace(' ', '_').replace('（', '_').replace('）', '_').replace('(', '_').replace(')', '_').replace('/', '_').replace('\\', '_')
+    return category.replace(' ', '_').replace('（', '_').replace('）', '_').replace('(', '_').replace(')', '_').replace(
+        '/', '_').replace('\\', '_')
+
 
 # 工具函数：用户对象转dict
 def serialize_user(user):
     if user:
         return {"id": user.id, "username": user.username, "nickname": getattr(user, "nickname", None)}
     return None
+
 
 # 工具函数：分页分组
 def get_grouped_data(db, request, per_page=10):
@@ -78,9 +81,6 @@ def get_grouped_data(db, request, per_page=10):
         })
     return grouped_data
 
-def is_html_content(content: str) -> bool:
-    """检测内容是否为HTML格式 - 现在所有内容都按HTML处理"""
-    return True
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request, db: Session = Depends(deps.get_db)):
@@ -136,7 +136,6 @@ def index(request: Request, db: Session = Depends(deps.get_db)):
     response.headers["Content-Type"] = "text/html; charset=utf-8"
     return response
 
- 
 
 @app.get("/register", response_class=HTMLResponse)
 def register_page(request: Request):
@@ -144,8 +143,10 @@ def register_page(request: Request):
     response.headers["Content-Type"] = "text/html; charset=utf-8"
     return response
 
+
 @app.post("/register")
-def register(request: Request, username: str = Form(...), password: str = Form(...), nickname: str = Form(None), db: Session = Depends(deps.get_db)):
+def register(request: Request, username: str = Form(...), password: str = Form(...), nickname: str = Form(None),
+             db: Session = Depends(deps.get_db)):
     if username in RESERVED_USERNAMES:
         response = templates.TemplateResponse("register.html", {"request": request, "msg": "该用户名被系统保留，请更换"})
         response.headers["Content-Type"] = "text/html; charset=utf-8"
@@ -157,9 +158,11 @@ def register(request: Request, username: str = Form(...), password: str = Form(.
     crud.create_user(db, schemas.UserCreate(username=username, password=password, nickname=nickname))
     return RedirectResponse("/login", status_code=302)
 
+
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
+
 
 @app.post("/login")
 def login(request: Request, username: str = Form(...), password: str = Form(...), db: Session = Depends(deps.get_db)):
@@ -171,7 +174,6 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
     response.set_cookie("access_token", token, httponly=True)
     return response
 
- 
 
 @app.get("/u/{username}/articles", response_class=HTMLResponse)
 def user_articles(username: str, request: Request, db: Session = Depends(deps.get_db)):
@@ -179,7 +181,8 @@ def user_articles(username: str, request: Request, db: Session = Depends(deps.ge
     if not author:
         return RedirectResponse("/", status_code=302)
     per_page = 5
-    categories = [row[0] for row in db.query(models.Article.category).filter(models.Article.author_id == author.id).distinct().all()]
+    categories = [row[0] for row in
+                  db.query(models.Article.category).filter(models.Article.author_id == author.id).distinct().all()]
     grouped_data = []
     for category in categories:
         cat_id = to_cat_id(category)
@@ -219,7 +222,6 @@ def user_articles(username: str, request: Request, db: Session = Depends(deps.ge
     response.headers["Content-Type"] = "text/html; charset=utf-8"
     return response
 
- 
 
 def get_current_user_from_cookie(request: Request, db: Session = Depends(deps.get_db)):
     token = request.cookies.get("access_token")
@@ -230,11 +232,13 @@ def get_current_user_from_cookie(request: Request, db: Session = Depends(deps.ge
     except Exception:
         return None
 
+
 @app.get("/logout")
 def logout():
     response = RedirectResponse("/", status_code=302)
     response.delete_cookie("access_token")
     return response
+
 
 @app.get("/profile", response_class=HTMLResponse)
 def profile_page(request: Request, db: Session = Depends(deps.get_db)):
@@ -261,6 +265,7 @@ def profile_page(request: Request, db: Session = Depends(deps.get_db)):
             "since": since,
         },
     })
+
 
 @app.post("/profile", response_class=HTMLResponse)
 def update_profile(request: Request, nickname: str = Form(None), db: Session = Depends(deps.get_db)):
@@ -291,17 +296,18 @@ def update_profile(request: Request, nickname: str = Form(None), db: Session = D
         },
     })
 
+
 @app.get("/article/{article_id}", response_class=HTMLResponse)
 def read_article(request: Request, article_id: int, db: Session = Depends(deps.get_db)):
     article = crud.get_article(db, article_id)
     if not article:
         return RedirectResponse("/", status_code=302)
-    
+
     user = get_current_user_from_cookie(request, db)
     user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
     if user_id:
         crud.add_view_record(db, user_id, int(article_id))
-    
+
     grouped_data = get_grouped_data(db, request)
     user_dict = serialize_user(user)
     return templates.TemplateResponse("article_detail.html", {
@@ -312,28 +318,32 @@ def read_article(request: Request, article_id: int, db: Session = Depends(deps.g
         "first_article": article
     })
 
+
 @app.get("/article/{article_id}/edit", response_class=HTMLResponse)
 def edit_article_page(request: Request, article_id: int, db: Session = Depends(deps.get_db)):
     user = get_current_user_from_cookie(request, db)
     if not user:
         return RedirectResponse("/login", status_code=302)
-    
+
     article = crud.get_article(db, article_id)
     if not article:
         return RedirectResponse("/", status_code=302)
-    
+
     # 只有文章作者才能编辑
     user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
     if user_id is not None and int(article.author_id) != user_id:
         return RedirectResponse("/", status_code=302)
-    
+
     # 查询所有分类
     categories = [row[0] for row in db.query(models.Article.category).distinct().all()]
     user_dict = serialize_user(user)
-    return templates.TemplateResponse("edit_article.html", {"request": request, "article": article, "user": user_dict, "categories": categories})
+    return templates.TemplateResponse("edit_article.html", {"request": request, "article": article, "user": user_dict,
+                                                            "categories": categories})
+
 
 @app.post("/article/{article_id}/edit")
-def edit_article(request: Request, article_id: int, title: str = Form(...), content: str = Form(...), category: str = Form("未分类"), db: Session = Depends(deps.get_db)):
+def edit_article(request: Request, article_id: int, title: str = Form(...), content: str = Form(...),
+                 category: str = Form("未分类"), db: Session = Depends(deps.get_db)):
     user = get_current_user_from_cookie(request, db)
     if not user:
         return RedirectResponse("/login", status_code=302)
@@ -346,8 +356,10 @@ def edit_article(request: Request, article_id: int, title: str = Form(...), cont
         return RedirectResponse("/", status_code=302)
     crud.update_article(db, article_id, schemas.ArticleUpdate(title=title, content=content, category=category))
     # 跳转到首页并带上分组hash和文章id，自动高亮该分组该文章
-    cat_id = category.replace(' ', '_').replace('（', '_').replace('）', '_').replace('(', '_').replace(')', '_').replace('/', '_').replace('\\', '_')
+    cat_id = category.replace(' ', '_').replace('（', '_').replace('）', '_').replace('(', '_').replace(')', '_').replace(
+        '/', '_').replace('\\', '_')
     return RedirectResponse(f"/?highlight_id={article_id}#group-{cat_id}", status_code=302)
+
 
 @app.get("/new", response_class=HTMLResponse)
 def new_article_page(request: Request, db: Session = Depends(deps.get_db)):
@@ -356,47 +368,52 @@ def new_article_page(request: Request, db: Session = Depends(deps.get_db)):
         return RedirectResponse("/login", status_code=302)
     user_dict = serialize_user(user)
     categories = [row[0] for row in db.query(models.Article.category).distinct().all()]
-    return templates.TemplateResponse("new_article.html", {"request": request, "categories": categories, "user": user_dict})
+    return templates.TemplateResponse("new_article.html",
+                                      {"request": request, "categories": categories, "user": user_dict})
+
 
 @app.post("/new")
-def new_article(request: Request, title: str = Form(...), content: str = Form(...), category: str = Form("未分类"), db: Session = Depends(deps.get_db)):
+def new_article(request: Request, title: str = Form(...), content: str = Form(...), category: str = Form("未分类"),
+                db: Session = Depends(deps.get_db)):
     user = get_current_user_from_cookie(request, db)
     if not user:
         return RedirectResponse("/login", status_code=302)
     user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
     if user_id:
         # 创建文章并获取返回的文章对象
-        new_article_obj = crud.create_article(db, user_id, schemas.ArticleCreate(title=title, content=content, category=category))
+        new_article_obj = crud.create_article(db, user_id,
+                                              schemas.ArticleCreate(title=title, content=content, category=category))
         # 跳转到首页并高亮显示新创建的文章
         cat_id = to_cat_id(category)
         return RedirectResponse(f"/?highlight_id={new_article_obj.id}#group-{cat_id}", status_code=302)
     return RedirectResponse("/", status_code=302)
+
 
 @app.get("/article/{article_id}/content")
 def get_article_content(article_id: int, request: Request, db: Session = Depends(deps.get_db)):
     article = crud.get_article(db, article_id)
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
-    
+
     user = get_current_user_from_cookie(request, db)
     user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
     # 浏览历史功能已移除
     can_edit = user_id == int(article.author_id) if article.author else False
-    
+
     # 返回原始内容，不进行HTML转义
     content = str(article.content) if article.content else ""
-    
+
     return {
         "id": article.id,
         "title": article.title,
         "content": content,
-        "author": (article.author.nickname if (article.author and getattr(article.author, "nickname", None)) else (article.author.username if article.author else "匿名")),
+        "author": (article.author.nickname if (article.author and getattr(article.author, "nickname", None)) else (
+            article.author.username if article.author else "匿名")),
         "author_id": article.author_id,
         "created_at": article.created_at.strftime('%Y-%m-%d %H:%M') if article.created_at else "",
         "can_edit": can_edit
     }
 
- 
 
 @app.post("/article/{article_id}/delete")
 def delete_article(article_id: int, request: Request, db: Session = Depends(deps.get_db)):
@@ -410,7 +427,8 @@ def delete_article(article_id: int, request: Request, db: Session = Depends(deps
     if user_id is not None and int(article.author_id) != user_id:
         return RedirectResponse("/", status_code=302)
     category = article.category or "未分类"
-    cat_id = category.replace(' ', '_').replace('（', '_').replace('）', '_').replace('(', '_').replace(')', '_').replace('/', '_').replace('\\', '_')
+    cat_id = category.replace(' ', '_').replace('（', '_').replace('）', '_').replace('(', '_').replace(')', '_').replace(
+        '/', '_').replace('\\', '_')
     page_param = f"page_{cat_id}"
     per_page = 10
 
@@ -427,13 +445,13 @@ def delete_article(article_id: int, request: Request, db: Session = Depends(deps
     # 删除后再获取该分组所有文章
     all_articles_after = crud.get_articles_by_category(db, category, skip=0, limit=100000)
     all_ids_after = [a.id for a in all_articles_after]
-    
+
     if all_ids_after:
         # 选定高亮id（优先下一篇、否则上一篇、否则第一个）
         if idx != -1 and idx < len(all_ids_after):
             highlight_id = all_ids_after[idx]  # 删除后idx位置变成下一篇
-        elif idx > 0 and idx-1 < len(all_ids_after):
-            highlight_id = all_ids_after[idx-1]  # 上一篇
+        elif idx > 0 and idx - 1 < len(all_ids_after):
+            highlight_id = all_ids_after[idx - 1]  # 上一篇
         else:
             highlight_id = all_ids_after[0]  # 第一个
         # 计算高亮id所在页码
@@ -441,14 +459,16 @@ def delete_article(article_id: int, request: Request, db: Session = Depends(deps
         target_page = (target_idx // per_page) + 1
         from urllib.parse import quote
         encoded_cat_id = quote(cat_id)
-        return RedirectResponse(f"/?{page_param}={target_page}&highlight_id={highlight_id}#group-{encoded_cat_id}", status_code=302)
+        return RedirectResponse(f"/?{page_param}={target_page}&highlight_id={highlight_id}#group-{encoded_cat_id}",
+                                status_code=302)
     else:
         # 该分组没文章，跳转到全局第一页第一篇
         from sqlalchemy import asc
         first_article = db.query(models.Article).order_by(asc(models.Article.created_at)).first()
         if first_article:
             first_cat = first_article.category or "未分类"
-            first_cat_id = first_cat.replace(' ', '_').replace('（', '_').replace('）', '_').replace('(', '_').replace(')', '_').replace('/', '_').replace('\\', '_')
+            first_cat_id = first_cat.replace(' ', '_').replace('（', '_').replace('）', '_').replace('(', '_').replace(
+                ')', '_').replace('/', '_').replace('\\', '_')
             target_articles = crud.get_articles_by_category(db, first_cat, skip=0, limit=1000)
             target_article_ids = [a.id for a in target_articles]
             try:
@@ -457,13 +477,17 @@ def delete_article(article_id: int, request: Request, db: Session = Depends(deps
                 page_param_target = f"page_{first_cat_id}"
                 from urllib.parse import quote
                 encoded_first_cat_id = quote(first_cat_id)
-                return RedirectResponse(f"/?{page_param_target}={target_page}&highlight_id={first_article.id}#group-{encoded_first_cat_id}", status_code=302)
+                return RedirectResponse(
+                    f"/?{page_param_target}={target_page}&highlight_id={first_article.id}#group-{encoded_first_cat_id}",
+                    status_code=302)
             except ValueError:
                 from urllib.parse import quote
                 encoded_first_cat_id = quote(first_cat_id)
-                return RedirectResponse(f"/?highlight_id={first_article.id}#group-{encoded_first_cat_id}", status_code=302)
+                return RedirectResponse(f"/?highlight_id={first_article.id}#group-{encoded_first_cat_id}",
+                                        status_code=302)
         else:
             return RedirectResponse("/", status_code=302)
+
 
 # 评论相关API
 @app.get("/api/comments/{article_id}")
@@ -474,19 +498,19 @@ def get_comments(article_id: int, db: Session = Depends(deps.get_db)):
     for comment in comments:
         # 获取回复（现在返回的是字典列表）
         replies = crud.get_comment_replies(db, comment.id)
-        
+
         # 优先显示昵称，如果没有昵称则显示用户名
         user_display_name = None
         if comment.user:
             user_display_name = comment.user.nickname or comment.user.username
-        
+
         comment_data = {
             "id": comment.id,
             "content": comment.content,
             "created_at": comment.created_at.strftime('%Y-%m-%d %H:%M'),
             "user": {
-                "id": comment.user.id, 
-                "username": comment.user.username, 
+                "id": comment.user.id,
+                "username": comment.user.username,
                 "nickname": comment.user.nickname,
                 "display_name": user_display_name  # 添加显示名称字段
             } if comment.user else None,
@@ -494,36 +518,37 @@ def get_comments(article_id: int, db: Session = Depends(deps.get_db)):
             "parent_id": comment.parent_id,
             "replies": replies  # 直接使用返回的字典列表
         }
-        
+
         result.append(comment_data)
-    
+
     response = JSONResponse(content={"comments": result})
     response.headers["Content-Type"] = "application/json; charset=utf-8"
     return response
 
+
 @app.post("/api/comments")
 def create_comment(
-    request: Request,
-    content: str = Form(...),
-    article_id: int = Form(...),
-    parent_id: int = Form(None),
-    anonymous_name: str = Form(""),
-    db: Session = Depends(deps.get_db)
+        request: Request,
+        content: str = Form(...),
+        article_id: int = Form(...),
+        parent_id: int = Form(None),
+        anonymous_name: str = Form(""),
+        db: Session = Depends(deps.get_db)
 ):
     """创建评论"""
     user = get_current_user_from_cookie(request, db)
-    
+
     # 验证文章存在
     article = crud.get_article(db, article_id)
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
-    
+
     # 如果是回复，验证父评论存在
     if parent_id:
         parent_comment = crud.get_comment(db, parent_id)
         if not parent_comment:
             raise HTTPException(status_code=404, detail="Parent comment not found")
-    
+
     # 创建评论
     comment_data = schemas.CommentCreate(
         content=content,
@@ -531,21 +556,21 @@ def create_comment(
         parent_id=parent_id,
         anonymous_name=anonymous_name if not user else None
     )
-    
+
     user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
     comment = crud.create_comment(db, comment_data, user_id)
-    
+
     # 优先显示昵称，如果没有昵称则显示用户名
     user_display_name = None
     if comment.user:
         user_display_name = comment.user.nickname or comment.user.username
-    
+
     response = JSONResponse(content={
         "id": comment.id,
         "content": comment.content,
         "created_at": comment.created_at.strftime('%Y-%m-%d %H:%M'),
         "user": {
-            "id": comment.user.id, 
+            "id": comment.user.id,
             "username": comment.user.username,
             "nickname": comment.user.nickname,
             "display_name": user_display_name  # 添加显示名称字段
@@ -556,15 +581,17 @@ def create_comment(
     response.headers["Content-Type"] = "application/json; charset=utf-8"
     return response
 
+
 @app.delete("/api/comments/{comment_id}")
 def delete_comment(comment_id: int, request: Request, db: Session = Depends(deps.get_db)):
     """删除评论 - 只有评论作者或文章作者可以删除"""
     user = get_current_user_from_cookie(request, db)
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
-    
+
     deleted_comment = crud.delete_comment(db, comment_id, user.id)
     if not deleted_comment:
-        raise HTTPException(status_code=403, detail="Permission denied - only comment author or article author can delete comments")
-    
+        raise HTTPException(status_code=403,
+                            detail="Permission denied - only comment author or article author can delete comments")
+
     return {"message": "Comment deleted successfully"}

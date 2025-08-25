@@ -1,207 +1,101 @@
+# app/db.py
 import os
-import shutil
-import signal
-import atexit
-import sqlite3
-import json
-from pathlib import Path
+import time
+import threading
+from contextlib import contextmanager
 
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import QueuePool
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session, declarative_base
 
-# 路径配置
-GCS_MOUNT = Path("/mnt/gcs")
-LOCAL_DB = Path("./litebook.db")
-CHECKSUM_FILE = Path("./db_checksum.json")
+# ---- 配置 ----
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////tmp/litebook.db")
+POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
+MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "10"))
 
-# 添加同步标志，避免重复执行
-_sync_executed = False
+print(f"[db] 使用数据库: {DATABASE_URL}")
 
-def get_file_checksum(file_path):
-    """获取文件的校验信息"""
-    if not file_path.exists():
-        return None
-    
-    stat = file_path.stat()
-    return {
-        "size": stat.st_size,
-        "mtime": stat.st_mtime,
-        "ctime": stat.st_ctime
-    }
-
-def save_checksum(checksum_data):
-    """保存校验信息到文件"""
-    try:
-        with open(CHECKSUM_FILE, 'w', encoding='utf-8') as f:
-            json.dump(checksum_data, f, ensure_ascii=False, indent=2)
-        print(f"✅ 校验信息已保存: {CHECKSUM_FILE}")
-    except Exception as e:
-        print(f"❌ 保存校验信息失败: {e}")
-
-def load_checksum():
-    """从文件加载校验信息"""
-    try:
-        if CHECKSUM_FILE.exists():
-            with open(CHECKSUM_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-    except Exception as e:
-        print(f"❌ 加载校验信息失败: {e}")
-    return None
-
-def copy_from_gcs_if_needed():
-    """从 GCS 复制数据库文件到本地（如果存在）"""
-    if not GCS_MOUNT.exists():
-        print("❌ GCS 挂载点不存在: /mnt/gcs")
-        return
-    
-    if not GCS_MOUNT.is_dir():
-        print("❌ GCS 挂载点不是目录: /mnt/gcs (可能是文件)")
-        return
-    
-    gcs_db = GCS_MOUNT / "litebook.db"
-    if not gcs_db.exists():
-        print("❌ GCS 中未找到数据库文件: /mnt/gcs/litebook.db")
-        return
-    
-    try:
-        print("🔄 从 GCS 复制数据库到本地...")
-        shutil.copy2(gcs_db, LOCAL_DB)
-        
-        # 复制完成后，生成校验文件
-        checksum_data = get_file_checksum(LOCAL_DB)
-        if checksum_data:
-            save_checksum(checksum_data)
-            print("✅ 复制成功，校验信息已保存")
-        else:
-            print("✅ 复制成功，但校验信息保存失败")
-            
-    except Exception as e:
-        print(f"❌ 复制失败: {e}")
-
-def sync_to_gcs():
-    """将本地数据库同步到 GCS"""
-    global _sync_executed
-    
-    # 避免重复执行
-    if _sync_executed:
-        print("✅ 数据同步已执行，跳过重复调用")
-        return
-    
-    # 检查 GCS 挂载
-    if not GCS_MOUNT.exists():
-        print("❌ GCS 挂载点不存在: /mnt/gcs")
-        return
-    
-    if not GCS_MOUNT.is_dir():
-        print("❌ GCS 挂载点不是目录: /mnt/gcs")
-        return
-    
-    # 检查本地数据库文件
-    if not LOCAL_DB.exists():
-        print("❌ 本地数据库文件不存在，无法同步")
-        return
-    
-    # 先执行 checkpoint，确保 WAL 数据合并到主库
-    print("🔄 执行 SQLite checkpoint...")
-    try:
-        with sqlite3.connect(LOCAL_DB) as conn:
-            conn.execute("PRAGMA wal_checkpoint(FULL);")
-        print("✅ checkpoint 完成")
-    except Exception as e:
-        print(f"❌ checkpoint 失败: {e}")
-        return
-    
-    # 加载之前保存的校验信息
-    saved_checksum = load_checksum()
-    if not saved_checksum:
-        print("❌ 未找到校验信息，无法判断文件变化")
-        return
-    
-    # 获取 checkpoint 后的文件状态
-    current_checksum = get_file_checksum(LOCAL_DB)
-    if not current_checksum:
-        print("❌ 无法获取当前文件校验信息")
-        return
-    
-    # 检查数据库文件是否有变化
-    db_changed = (current_checksum["size"] != saved_checksum["size"] or 
-                  current_checksum["mtime"] != saved_checksum["mtime"])
-    
-    if not db_changed:
-        print("✅ 数据库文件无变化，无需同步")
-        return
-
-    gcs_db = GCS_MOUNT / "litebook.db"
-    try:
-        # 同步数据库到 GCS
-        print("🔄 同步数据库到 GCS...")
-        shutil.copyfile(LOCAL_DB, gcs_db)  # 只复制内容，不做 copystat
-        
-        # 同步完成后，更新校验信息
-        print("🔄 更新校验信息...")
-        new_checksum = get_file_checksum(LOCAL_DB)
-        if new_checksum:
-            save_checksum(new_checksum)
-            print("✅ 同步成功，校验信息已更新")
-        else:
-            print("✅ 同步成功，但校验信息更新失败")
-            
-    except Exception as e:
-        print(f"❌ 同步失败: {e}")
-
-def signal_handler(signum, frame):
-    """信号处理器，在容器关闭时同步数据"""
-    print(f"\n📡 收到信号 {signum}，开始同步数据到 GCS...")
-    sync_to_gcs()
-    print("🔄 数据同步完成，准备关闭应用...")
-    exit(0)
-
-def register_shutdown_hooks():
-    """注册关闭时的钩子函数"""
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
-    atexit.register(sync_to_gcs)
-    print("✅ 已注册数据同步钩子函数")
-
-# Startup actions
-copy_from_gcs_if_needed()
-register_shutdown_hooks()
-
-# 数据库连接配置 - 始终使用本地文件
-DATABASE_URL = "sqlite:///./litebook.db"
-
-print(f"使用数据库: {DATABASE_URL}")
-
-# SQLite 在多线程环境下需要 check_same_thread=False
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={
-        "check_same_thread": False,
-        "timeout": 30,
-    } if DATABASE_URL.startswith("sqlite") else {},
-    poolclass=QueuePool if DATABASE_URL.startswith("sqlite") else None,
-    pool_size=int(os.getenv("DB_POOL_SIZE", "5")),
-    max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "10")),
-    pool_pre_ping=True,
-)
-
-if DATABASE_URL.startswith("sqlite"):
-    @event.listens_for(engine, "connect")
-    def set_sqlite_pragma(dbapi_connection, connection_record):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute("PRAGMA synchronous=NORMAL;")
-        cursor.execute("PRAGMA foreign_keys=ON;")
-        cursor.execute("PRAGMA busy_timeout=5000;")
-        cursor.close()
-
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# ---- 全局对象（会在 resume 时重建）----
+_engine = None
+SessionLocal = None
 Base = declarative_base()
 
+# 写闸门：set() 允许写；clear() 暂停写（新的 get_db 会等待）
+_write_gate = threading.Event()
+_write_gate.set()
 
-def get_db():
+
+def _build_engine():
+    """创建 engine 与 SessionLocal。SQLite 设定 check_same_thread=False。"""
+    connect_args = {"check_same_thread": False, "timeout": 30} if DATABASE_URL.startswith("sqlite") else {}
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args=connect_args,
+        pool_pre_ping=True,
+        pool_size=POOL_SIZE,
+        max_overflow=MAX_OVERFLOW,
+        future=True,
+    )
+
+    # SQLite 连接参数：配合同步逻辑使用 DELETE，不要启 WAL
+    if DATABASE_URL.startswith("sqlite"):
+        @event.listens_for(engine, "connect")
+        def _sqlite_pragmas(dbapi_connection, connection_record):
+            cur = dbapi_connection.cursor()
+            # 与 sync.py 的 checkpoint 逻辑一致：主库无 WAL/SHM
+            cur.execute("PRAGMA journal_mode=DELETE;")
+            cur.execute("PRAGMA synchronous=NORMAL;")
+            cur.execute("PRAGMA foreign_keys=ON;")
+            cur.execute("PRAGMA busy_timeout=5000;")
+            cur.close()
+
+    session_cls = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+    return engine, session_cls
+
+
+def _init_engine():
+    global _engine, SessionLocal
+    _engine, SessionLocal = _build_engine()
+
+
+_init_engine()  # 模块导入时初始化
+
+
+def recreate_engine():
+    """重建连接池（resume 时调用）"""
+    global _engine, SessionLocal
+    try:
+        if _engine is not None:
+            _engine.dispose(close=True)
+    finally:
+        _engine, SessionLocal = _build_engine()
+
+
+def stop_writers(timeout: float = 1.0):
+    """
+    暂停写入：
+      1) 关闸：新的 get_db() 会在闸门等待
+      2) 等待在途事务收尾（timeout 秒）
+      3) 释放连接池（engine.dispose）
+    """
+    _write_gate.clear()
+    time.sleep(timeout)
+    if _engine is not None:
+        _engine.dispose(close=True)
+
+
+def resume_writers():
+    """恢复写入：重建连接池 + 开闸"""
+    recreate_engine()
+    _write_gate.set()
+
+
+@contextmanager
+def get_db() -> Session:
+    """
+    FastAPI 依赖：写请求在闸门关闭期间会阻塞。
+    如果你将此依赖用于“只读”路由且不希望被阻塞，可另外做一个只读依赖不等待闸门。
+    """
+    _write_gate.wait()  # 若 stop_writers() 已调用，这里会等待 resume_writers()
     db = SessionLocal()
     try:
         yield db
