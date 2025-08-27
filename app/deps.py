@@ -1,102 +1,84 @@
-# app/db.py
+# app/deps.py
+from __future__ import annotations
+
 import os
-import time
-import threading
-from contextlib import contextmanager
+from typing import Generator, Optional
 
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker, Session, declarative_base
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker, declarative_base
+from sqlalchemy.pool import QueuePool
 
-# ---- 配置 ----
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////tmp/litebook.db")
 POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
 MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "10"))
 
-print(f"[db] 使用数据库: {DATABASE_URL}")
+print(f"[deps] 使用数据库: {DATABASE_URL}")
 
-# ---- 全局对象（会在 resume 时重建）----
-_engine = None
-SessionLocal = None
+# 对外导出
+engine: Optional[Engine] = None
+SessionLocal: Optional[sessionmaker] = None
 Base = declarative_base()
 
-# 写闸门：set() 允许写；clear() 暂停写（新的 get_db 会等待）
-_write_gate = threading.Event()
-_write_gate.set()
 
+def _build_engine() -> tuple[Engine, sessionmaker]:
+    is_sqlite = DATABASE_URL.startswith("sqlite")
+    connect_args = {"check_same_thread": False, "timeout": 30} if is_sqlite else {}
 
-def _build_engine():
-    """创建 engine 与 SessionLocal。SQLite 设定 check_same_thread=False。"""
-    connect_args = {"check_same_thread": False, "timeout": 30} if DATABASE_URL.startswith("sqlite") else {}
-    engine = create_engine(
+    # 关键点：
+    # - SQLite 默认是 SingletonThreadPool，不利于多线程共享同一连接；这里显式使用 QueuePool。
+    # - 非 SQLite 也保持 QueuePool（默认就是），参数通用。
+    eng = create_engine(
         DATABASE_URL,
         connect_args=connect_args,
-        pool_pre_ping=True,
+        poolclass=QueuePool,
         pool_size=POOL_SIZE,
         max_overflow=MAX_OVERFLOW,
+        pool_pre_ping=True,
         future=True,
     )
 
-    # SQLite 连接参数：配合同步逻辑使用 DELETE，不要启 WAL
-    if DATABASE_URL.startswith("sqlite"):
-        @event.listens_for(engine, "connect")
+    if is_sqlite:
+        @event.listens_for(eng, "connect")
         def _sqlite_pragmas(dbapi_connection, connection_record):
+            # 每个物理连接建立时设置一次
             cur = dbapi_connection.cursor()
-            # 与 sync.py 的 checkpoint 逻辑一致：主库无 WAL/SHM
-            cur.execute("PRAGMA journal_mode=DELETE;")
+            # 运行期 WAL：写入更快，读写并发更友好
+            cur.execute("PRAGMA journal_mode=WAL;")
+            # 在 WAL 下，NORMAL 已经足够（性能/耐久性平衡）
             cur.execute("PRAGMA synchronous=NORMAL;")
+            # 建议开启外键约束
             cur.execute("PRAGMA foreign_keys=ON;")
-            cur.execute("PRAGMA busy_timeout=5000;")
+            # 忙等待时间（毫秒）——竞争写入时更友好
+            cur.execute("PRAGMA busy_timeout=10000;")
             cur.close()
 
-    session_cls = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
-    return engine, session_cls
+    session_cls = sessionmaker(bind=eng, autoflush=False, autocommit=False, expire_on_commit=False)
+    return eng, session_cls
 
 
-def _init_engine():
-    global _engine, SessionLocal
-    _engine, SessionLocal = _build_engine()
+def _init_engine() -> None:
+    global engine, SessionLocal
+    engine, SessionLocal = _build_engine()
 
 
-_init_engine()  # 模块导入时初始化
+_init_engine()
 
 
-def recreate_engine():
-    """重建连接池（resume 时调用）"""
-    global _engine, SessionLocal
+def recreate_engine() -> None:
+    """如需在运行时重建连接池（极少需要），可调用此函数。"""
+    global engine, SessionLocal
     try:
-        if _engine is not None:
-            _engine.dispose(close=True)
+        if engine is not None:
+            engine.dispose(close=True)
     finally:
-        _engine, SessionLocal = _build_engine()
+        engine, SessionLocal = _build_engine()
 
 
-def stop_writers(timeout: float = 1.0):
-    """
-    暂停写入：
-      1) 关闸：新的 get_db() 会在闸门等待
-      2) 等待在途事务收尾（timeout 秒）
-      3) 释放连接池（engine.dispose）
-    """
-    _write_gate.clear()
-    time.sleep(timeout)
-    if _engine is not None:
-        _engine.dispose(close=True)
-
-
-def resume_writers():
-    """恢复写入：重建连接池 + 开闸"""
-    recreate_engine()
-    _write_gate.set()
-
-
-@contextmanager
-def get_db() -> Session:
-    """
-    FastAPI 依赖：写请求在闸门关闭期间会阻塞。
-    如果你将此依赖用于“只读”路由且不希望被阻塞，可另外做一个只读依赖不等待闸门。
-    """
-    _write_gate.wait()  # 若 stop_writers() 已调用，这里会等待 resume_writers()
-    db = SessionLocal()
+def get_db() -> Generator[Session, None, None]:
+    """FastAPI 依赖。正常创建/关闭会话即可。"""
+    assert SessionLocal is not None, "SessionLocal 未初始化"
+    db: Session = SessionLocal()
     try:
         yield db
     finally:

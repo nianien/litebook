@@ -8,8 +8,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from . import models, schemas, crud, auth, deps
-from .sync import register_lifecycle
-from app.deps import stop_writers, resume_writers
+from .sync import setup_lifecycle
 
 app = FastAPI(
     title="LiteBlog",
@@ -21,13 +20,7 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 
-# 注册：把暂停/恢复写入回调交给 sync.py
-register_lifecycle(
-    app,
-    stop_writers_cb=lambda: stop_writers(1.0),  # 暂停窗口给 1s 让在途事务收尾
-    resume_writers_cb=resume_writers,
-    enable_periodic=True,
-)
+setup_lifecycle(app, enable_periodic=True)
 
 # 保留用户名前缀，避免与系统路由冲突
 RESERVED_USERNAMES = {"u"}
@@ -223,7 +216,7 @@ def user_articles(username: str, request: Request, db: Session = Depends(deps.ge
     return response
 
 
-def get_current_user_from_cookie(request: Request, db: Session = Depends(deps.get_db)):
+def get_current_user_from_cookie(request: Request, db: Session):
     token = request.cookies.get("access_token")
     if not token:
         return None

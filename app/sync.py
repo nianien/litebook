@@ -1,206 +1,257 @@
 # app/sync.py
 from __future__ import annotations
-import os, shutil, sqlite3, signal, atexit, hashlib, asyncio
+import os, shutil, sqlite3, signal, atexit, hashlib, asyncio, threading
 from pathlib import Path
 from fastapi import FastAPI
+from contextlib import asynccontextmanager
 
+# ========= 配置 =========
 DB_NAME = os.getenv("LITEBOOK_DB_NAME", "litebook.db")
-LOCAL_DB = Path(os.getenv("LOCAL_DB_PATH", f"/tmp/{DB_NAME}"))
-GCS_DB = Path(os.getenv("GCS_DB_PATH", f"/mnt/gcs/{DB_NAME}"))
-SYNC_INTERVAL_SEC = int(os.getenv("SYNC_INTERVAL_SEC", "600"))
+LOCAL_DB = Path(os.getenv("LOCAL_DB_PATH", f"/tmp/{DB_NAME}"))  # 运行时本地 DB
+GCS_DB = Path(os.getenv("GCS_DB_PATH", f"/mnt/gcs/{DB_NAME}"))  # GCS FUSE 目标
+SYNC_INTERVAL_SEC = int(os.getenv("SYNC_INTERVAL_SEC", "600"))  # 周期同步（秒）
 
-# 本地 MD5 基准
-CHECKSUM_FILE = LOCAL_DB.with_name(LOCAL_DB.name + ".sum")
-# 本地快照（用于缩短暂停窗口）
-SNAP_DB = LOCAL_DB.with_suffix(".snap")
+CHECKSUM_FILE = LOCAL_DB.with_name(LOCAL_DB.name + ".sum")  # 本地 MD5 基准
+SNAP_DB = LOCAL_DB.with_suffix(".snap")  # 本地快照（缩短暂停窗口）
 
+# ========= 并发与状态 =========
 shutdown_evt: asyncio.Event | None = None
-sync_lock = asyncio.Lock()
-_periodic_task: asyncio.Task | None = None
-_stop_writers_cb = None
-_resume_writers_cb = None
+_sync_mutex = threading.RLock()  # 串行化：周期 / 退出 / 信号
+_finalized = False  # 是否已进行过“成功的最终同步”（受 _sync_mutex 保护）
 
 
+# ========= 日志 =========
+def log(msg: str): print(msg, flush=True)
+
+
+# ========= 小工具 =========
 def ensure_parent(p: Path): p.parent.mkdir(parents=True, exist_ok=True)
 
 
-def md5_file(path: Path, chunk_size: int = 4 * 1024 * 1024) -> str:
+def md5_file(path: Path, chunk: int = 4 * 1024 * 1024) -> str:
     h = hashlib.md5()
     with open(path, "rb") as f:
-        for buf in iter(lambda: f.read(chunk_size), b""):
-            h.update(buf)
+        for buf in iter(lambda: f.read(chunk), b""): h.update(buf)
     return h.hexdigest()
 
 
 def copy_atomic(src: Path, dst: Path):
+    """临时文件 + 原子替换；不保留元数据（适配 GCS FUSE）。"""
     ensure_parent(dst)
     tmp = dst.with_suffix(dst.suffix + ".tmp")
-    shutil.copyfile(src, tmp)  # 禁用 copy2/copystat/chown/chmod/utime
+    shutil.copyfile(src, tmp)  # 避免 copystat/owner/mtime
     os.replace(tmp, dst)
 
 
-def checkpoint(db_path: Path):
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    cur = conn.cursor()
-    cur.execute("PRAGMA wal_checkpoint(FULL);")
-    cur.execute("PRAGMA journal_mode=DELETE;")
-    cur.execute("PRAGMA synchronous=NORMAL;")
-    conn.commit();
-    conn.close()
-
-
-def save_checksum_local(md5_hash: str):
+def save_checksum(md5_hash: str):
     ensure_parent(CHECKSUM_FILE)
     tmp = CHECKSUM_FILE.with_suffix(CHECKSUM_FILE.suffix + ".tmp")
     tmp.write_text(md5_hash + "\n", encoding="utf-8")
     os.replace(tmp, CHECKSUM_FILE)
 
 
-def load_checksum_local() -> str | None:
+def load_checksum() -> str | None:
     try:
         return CHECKSUM_FILE.read_text(encoding="utf-8").strip() if CHECKSUM_FILE.exists() else None
     except Exception:
         return None
 
 
+# ========= checkpoint =========
+def checkpoint(db_path: Path, mode: str):
+    """
+    PRAGMA wal_checkpoint(PASSIVE|FULL|RESTART|TRUNCATE)
+    返回 (busy, log, checkpointed) 或 None（部分环境不返回）
+    """
+    mode = mode.upper()
+    log(f"🧩 [sync] checkpoint({mode}) 开始")
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    try:
+        cur = conn.cursor()
+        cur.execute(f"PRAGMA wal_checkpoint({mode});")
+        try:
+            res = cur.fetchone()
+        except Exception:
+            res = None
+        conn.commit()
+        log(f"🧩 [sync] checkpoint({mode}) 完成，结果={res}")
+        return res
+    finally:
+        conn.close()
+
+
+# ========= 启动：对齐本地与 GCS =========
 def start_from_gcs():
     if GCS_DB.exists():
+        log("🚚 启动：检测到 GCS 主库，复制到本地…")
         copy_atomic(GCS_DB, LOCAL_DB)
-        save_checksum_local(md5_file(LOCAL_DB))
-        print("✅ 启动：已从 GCS 拉取数据库，并写入本地 .sum")
+        base = md5_file(LOCAL_DB)
+        save_checksum(base)
+        log(f"✅ 启动：本地已对齐（md5={base}）")
     else:
-        ensure_parent(LOCAL_DB)
-        conn = sqlite3.connect(LOCAL_DB, check_same_thread=False)
-        conn.execute("PRAGMA journal_mode=DELETE;")
-        conn.execute("PRAGMA synchronous=NORMAL;")
-        conn.commit();
-        conn.close()
+        log("🆕 启动：GCS 无主库，初始化并回写…")
+        # 惰性导入建表（会创建文件）；失败则至少占位创建空库
+        try:
+            ensure_parent(LOCAL_DB)
+            from . import models, deps
+            # ⚠️ 确保 deps.DATABASE_URL 指向 LOCAL_DB 对应路径
+            models.Base.metadata.create_all(bind=deps.engine)  # 若无文件，会创建并建表
+            log("✅ 初次建表完成")
+        except Exception as e:
+            log(f"⚠️ 初次建表失败：{e!r}（可忽略，首次写入也会建表）")
+            if not LOCAL_DB.exists():
+                sqlite3.connect(LOCAL_DB).close()
+                log("ℹ️ 已创建空库占位")
+
         copy_atomic(LOCAL_DB, GCS_DB)
-        save_checksum_local(md5_file(LOCAL_DB))
-        print("✅ 启动：初始化空库并同步到 GCS，写入本地 .sum")
+        base = md5_file(LOCAL_DB)
+        save_checksum(base)
+        log(f"✅ 已将本地库同步到 GCS（md5={base}）")
 
 
-def sync_to_gcs_if_changed() -> bool:
+# ========= 统一同步动作（含“最终化”幂等）=========
+def sync_once(mode: str = "PASSIVE", *, reason: str = "periodic", finalize: bool = False) -> bool:
     """
-    暂停写 → checkpoint → 本地快照（SNAP_DB）→ 立即恢复写 → 用快照算 MD5/上传 → 更新 .sum → 清理快照
+    执行一次同步（带幂等最终化）：
+      1) 若 finalize=True 且已最终化，则直接跳过
+      2) checkpoint(mode)
+      3) 快照 & MD5 比对
+      4) 变化则上传 & 更新 .sum
+      5) 若 finalize=True 且流程成功，则标记已最终化
+
+    返回：success(bool) —— 流程是否成功（未上传但流程跑通也算 True）
     """
-    if not LOCAL_DB.exists():
-        print("❌ 本地 DB 不存在，跳过同步")
-        return False
+    mode = mode.upper()
+    if mode not in {"PASSIVE", "FULL", "RESTART", "TRUNCATE"}:
+        raise ValueError(f"[sync] unsupported checkpoint mode: {mode}")
 
-    paused = False
-    try:
-        # 1) 暂停写入（可选，建议注入回调以缩短窗口）
-        if callable(_stop_writers_cb):
-            try:
-                _stop_writers_cb()
-                paused = True
-            except Exception as e:
-                print("stop_writers_cb failed:", repr(e))
-
-        # 2) 合并 WAL，固定一致视图
-        checkpoint(LOCAL_DB)
-
-        # 3) 做本地快照（速度快，尽快结束暂停窗口）
-        shutil.copyfile(LOCAL_DB, SNAP_DB)
-
-    finally:
-        # 4) 恢复写入（即使上面出错也尽量恢复）
-        if paused and callable(_resume_writers_cb):
-            try:
-                _resume_writers_cb()
-            except Exception as e:
-                print("resume_writers_cb failed:", repr(e))
-
-    # 5) 之后基于快照进行耗时操作（不再阻塞业务）
-    try:
-        saved_md5 = load_checksum_local()
-        snap_md5 = md5_file(SNAP_DB)
-
-        if saved_md5 and snap_md5 == saved_md5:
-            print("✅ MD5 未变化（基于快照），跳过上传")
+    global _finalized
+    with _sync_mutex:
+        # 幂等跳过（仅限最终化路径）
+        if finalize and _finalized:
+            log(f"🔒 已最终化，跳过（reason={reason}, mode={mode}）")
             return False
 
-        copy_atomic(SNAP_DB, GCS_DB)
-        save_checksum_local(snap_md5)
-        print(f"✅ 已同步快照到 GCS，更新本地 md5={snap_md5[:8]}…")
-        return True
+        if not LOCAL_DB.exists():
+            log("❌ [sync] 本地 DB 不存在，跳过")
+            return False
 
-    except Exception as e:
-        print("❌ 同步失败：", repr(e))
-        return False
+        log(f"🔁 [sync] 进入（mode={mode}, reason={reason}, finalize={finalize}）")
 
-    finally:
+        # 1) checkpoint（尽力而为）
         try:
-            SNAP_DB.unlink(missing_ok=True)
-        except Exception:
-            pass
-
-
-async def sync_to_gcs_if_changed_async() -> bool:
-    async with sync_lock:
-        return sync_to_gcs_if_changed()
-
-
-async def periodic_sync():
-    assert shutdown_evt is not None
-    while not shutdown_evt.is_set():
-        try:
-            await asyncio.sleep(SYNC_INTERVAL_SEC)
-            if not LOCAL_DB.exists():
-                continue
-            print("[sync] 周期检查…")
-            await sync_to_gcs_if_changed_async()
-            print("[sync] 周期检查完成")
-        except asyncio.CancelledError:
-            return
+            checkpoint(LOCAL_DB, mode=mode)
         except Exception as e:
-            print("[sync] 周期任务异常：", repr(e))
+            log(f"⚠️ checkpoint({mode}) 异常：{e!r}")
+
+        # 2) 快照
+        shutil.copyfile(LOCAL_DB, SNAP_DB)
+        log(f"📸 快照 {SNAP_DB}")
+
+        # 3) MD5 比对
+        base_md5 = load_checksum()
+        snap_md5 = md5_file(SNAP_DB)
+        log(f"🔎 基准={base_md5 if base_md5 else 'None'} / 快照={snap_md5}")
+
+        success = True  # 默认成功；上传阶段抛错再置 False
+        try:
+            if base_md5 and snap_md5 == base_md5:
+                log("✅ MD5 未变化，跳过上传")
+            else:
+                copy_atomic(SNAP_DB, GCS_DB)
+                save_checksum(snap_md5)
+                log(f"✅ 已同步到 GCS（mode={mode}，reason={reason}），md5={snap_md5}")
+        except Exception as e:
+            success = False
+            log(f"❌ [sync] 上传失败：{e!r}")
+        finally:
+            try:
+                SNAP_DB.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        # 4) 最终化置位（仅在 finalize=True 且流程成功时）
+        if finalize and success and not _finalized:
+            _finalized = True
+            log("🏁 已标记为最终同步完成")
+
+        return success
 
 
-def register_lifecycle(app: FastAPI, stop_writers_cb=None, resume_writers_cb=None, enable_periodic=True):
-    global _stop_writers_cb, _resume_writers_cb
-    _stop_writers_cb = stop_writers_cb
-    _resume_writers_cb = resume_writers_cb
+# ========= Lifespan：安装周期任务 + 信号 + atexit =========
+def setup_lifecycle(app: FastAPI, enable_periodic: bool = True):
+    """main.py 用：from .sync import setup_lifecycle; setup_lifecycle(app)"""
+    _periodic_task: asyncio.Task | None = None
 
-    @app.on_event("startup")
-    async def _startup():
-        global shutdown_evt, _periodic_task
+    async def periodic_sync():
+        assert shutdown_evt is not None
+        while not shutdown_evt.is_set():
+            try:
+                await asyncio.sleep(SYNC_INTERVAL_SEC)
+                if shutdown_evt.is_set():
+                    break
+                log("[sync] 周期检查…")
+                sync_once(mode="PASSIVE", reason="periodic", finalize=False)
+                log("[sync] 周期检查完成")
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                log(f"[sync] 周期任务异常：{repr(e)}")
+
+    def _raw_signal_handler(signum, frame):
+        log(f"📡 收到信号 {signum}，准备最终同步…")
+        import threading as _t
+        # 后台线程做最终同步（TRUNCATE，幂等）
+        _t.Thread(
+            target=lambda: sync_once(mode="TRUNCATE", reason=f"signal:{signum}", finalize=True),
+            daemon=True,
+        ).start()
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        global shutdown_evt
+        nonlocal _periodic_task
+
         shutdown_evt = asyncio.Event()
+
+        # startup
+        log("🚀 startup(lifespan): 初始化开始")
         start_from_gcs()
 
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
+        # 安装信号（优先 loop.add_signal_handler）
+        try:
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                try:
+                    loop.add_signal_handler(sig, lambda s=sig: _raw_signal_handler(s, None))
+                except NotImplementedError:
+                    signal.signal(sig, _raw_signal_handler)
+        except Exception:
             try:
-                loop.add_signal_handler(sig, lambda: shutdown_evt.set())
-            except NotImplementedError:
+                signal.signal(signal.SIGTERM, _raw_signal_handler)
+                signal.signal(signal.SIGINT, _raw_signal_handler)
+            except Exception:
                 pass
 
         if enable_periodic and SYNC_INTERVAL_SEC > 0:
             _periodic_task = asyncio.create_task(periodic_sync())
 
-        atexit.register(lambda: asyncio.run(sync_to_gcs_if_changed_async()))
-        print("✅ lifecycle hooks installed")
+        # 兜底：atexit（若信号/关停未跑到；幂等）
+        atexit.register(lambda: sync_once(mode="TRUNCATE", reason="atexit", finalize=True))
 
-    @app.on_event("shutdown")
-    async def _shutdown():
-        if shutdown_evt:
-            shutdown_evt.set()
-        if _periodic_task:
-            _periodic_task.cancel()
-            try:
-                await _periodic_task
-            except Exception:
-                pass
+        log("✅ lifecycle hooks installed (lifespan)")
         try:
-            await sync_to_gcs_if_changed_async()
-            print("[sync] 最终同步完成")
-        except Exception as e:
-            print("[sync] 最终同步失败：", repr(e))
+            yield
+        finally:
+            # shutdown 阶段的“最后一搏”（幂等）
+            if shutdown_evt:
+                shutdown_evt.set()
+            if _periodic_task:
+                _periodic_task.cancel()
+                try:
+                    await _periodic_task
+                except Exception:
+                    pass
+            sync_once(mode="TRUNCATE", reason="shutdown", finalize=True)
 
-    @app.get("/_health/gcs")
-    def _gcs_probe():
-        def info(p: Path):
-            return {"exists": p.exists(), "size": (p.stat().st_size if p.exists() else 0)}
-
-        return {"ok": True, "local": info(LOCAL_DB), "gcs": info(GCS_DB)}
+    app.router.lifespan_context = lifespan
