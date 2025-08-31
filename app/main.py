@@ -87,8 +87,7 @@ def index(request: Request, db: Session = Depends(deps.get_db)):
     skip_hot = (page_hot - 1) * per_page_hot
 
     latest_articles = crud.get_articles(db, skip=skip_latest, limit=per_page_latest)
-    hot_rows = crud.get_hot_articles_by_comments_paginated(db, skip=skip_hot, limit=per_page_hot)
-    hot_articles = [row[0] for row in hot_rows]
+    hot_articles = crud.get_hot_articles_paginated(db, skip=skip_hot, limit=per_page_hot)
 
     total_latest = crud.get_articles_count(db)
     # 热门总数等同于文章总数（评论聚合后仍是文章集合）
@@ -211,6 +210,13 @@ def user_articles(username: str, request: Request, db: Session = Depends(deps.ge
         "grouped_data": grouped_data,
         "first_article": first_article,
         "base_url": f"/u/{username}/articles",
+        # 为模板提供必需的变量
+        "latest_articles": [],
+        "hot_articles": [],
+        "page_latest": 1,
+        "total_latest_pages": 1,
+        "page_hot": 1,
+        "total_hot_pages": 1,
     })
     response.headers["Content-Type"] = "text/html; charset=utf-8"
     return response
@@ -404,7 +410,10 @@ def get_article_content(article_id: int, request: Request, db: Session = Depends
             article.author.username if article.author else "匿名")),
         "author_id": article.author_id,
         "created_at": article.created_at.strftime('%Y-%m-%d %H:%M') if article.created_at else "",
-        "can_edit": can_edit
+        "can_edit": can_edit,
+        "view_count": article.view_count or 0,
+        "like_count": article.like_count or 0,
+        "comment_count": article.comment_count or 0
     }
 
 
@@ -588,3 +597,67 @@ def delete_comment(comment_id: int, request: Request, db: Session = Depends(deps
                             detail="Permission denied - only comment author or article author can delete comments")
 
     return {"message": "Comment deleted successfully"}
+
+
+# 全新的点赞和浏览API
+@app.post("/api/articles/{article_id}/view")
+async def increment_view_count(
+        article_id: int,
+        db: Session = Depends(deps.get_db)
+):
+    """增加文章浏览数"""
+    try:
+        article = crud.increment_view_count(db, article_id)
+        if not article:
+            raise HTTPException(status_code=404, detail="Article not found")
+        return {"message": "View count incremented", "view_count": article.view_count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/articles/{article_id}/like")
+async def toggle_article_like(
+        article_id: int,
+        request: Request,
+        db: Session = Depends(deps.get_db)
+):
+    """切换文章点赞状态"""
+    user = get_current_user_from_cookie(request, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    # 验证文章存在
+    article = crud.get_article(db, article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    # 不能给自己的文章点赞
+    if article.author_id == user.id:
+        raise HTTPException(status_code=400, detail="Cannot like your own article")
+
+    # 切换点赞状态
+    is_liked = crud.toggle_article_like(db, user.id, article_id)
+
+    # 重新获取文章信息
+    article = crud.get_article(db, article_id)
+
+    return {
+        "message": "Liked" if is_liked else "Unliked",
+        "is_liked": is_liked,
+        "like_count": article.like_count
+    }
+
+
+@app.get("/api/articles/{article_id}/like-status")
+async def get_article_like_status(
+        article_id: int,
+        request: Request,
+        db: Session = Depends(deps.get_db)
+):
+    """获取用户对文章的点赞状态"""
+    user = get_current_user_from_cookie(request, db)
+    if not user:
+        return {"is_liked": False}
+
+    is_liked = crud.get_user_article_like_status(db, user.id, article_id)
+    return {"is_liked": is_liked}

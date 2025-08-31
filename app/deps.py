@@ -9,7 +9,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker, declarative_base
 from sqlalchemy.pool import QueuePool
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////tmp/litebook.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./litebook.db")
 POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
 MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "10"))
 

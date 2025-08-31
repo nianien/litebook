@@ -6,9 +6,8 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 
 # ========= 配置 =========
-DB_NAME = os.getenv("LITEBOOK_DB_NAME", "litebook.db")
-LOCAL_DB = Path(os.getenv("LOCAL_DB_PATH", f"/tmp/{DB_NAME}"))  # 运行时本地 DB
-GCS_DB = Path(os.getenv("GCS_DB_PATH", f"/mnt/gcs/{DB_NAME}"))  # GCS FUSE 目标
+LOCAL_DB = Path(os.getenv("LOCAL_DB_PATH", f"./litebook.db"))  # 运行时本地 DB
+GCS_DB = Path(os.getenv("GCS_DB_PATH", f"/mnt/gcs/litebook.db"))  # GCS FUSE 目标
 SYNC_INTERVAL_SEC = int(os.getenv("SYNC_INTERVAL_SEC", "600"))  # 周期同步（秒）
 
 CHECKSUM_FILE = LOCAL_DB.with_name(LOCAL_DB.name + ".sum")  # 本地 MD5 基准
@@ -82,31 +81,11 @@ def checkpoint(db_path: Path, mode: str):
 
 # ========= 启动：对齐本地与 GCS =========
 def start_from_gcs():
-    if GCS_DB.exists():
-        log("🚚 启动：检测到 GCS 主库，复制到本地…")
-        copy_atomic(GCS_DB, LOCAL_DB)
-        base = md5_file(LOCAL_DB)
-        save_checksum(base)
-        log(f"✅ 启动：本地已对齐（md5={base}）")
-    else:
-        log("🆕 启动：GCS 无主库，初始化并回写…")
-        # 惰性导入建表（会创建文件）；失败则至少占位创建空库
-        try:
-            ensure_parent(LOCAL_DB)
-            from . import models, deps
-            # ⚠️ 确保 deps.DATABASE_URL 指向 LOCAL_DB 对应路径
-            models.Base.metadata.create_all(bind=deps.engine)  # 若无文件，会创建并建表
-            log("✅ 初次建表完成")
-        except Exception as e:
-            log(f"⚠️ 初次建表失败：{e!r}（可忽略，首次写入也会建表）")
-            if not LOCAL_DB.exists():
-                sqlite3.connect(LOCAL_DB).close()
-                log("ℹ️ 已创建空库占位")
-
-        copy_atomic(LOCAL_DB, GCS_DB)
-        base = md5_file(LOCAL_DB)
-        save_checksum(base)
-        log(f"✅ 已将本地库同步到 GCS（md5={base}）")
+    log("🚚 启动：检测到 GCS 主库，复制到本地…")
+    copy_atomic(GCS_DB, LOCAL_DB)
+    base = md5_file(LOCAL_DB)
+    save_checksum(base)
+    log(f"✅ 启动：本地已对齐（md5={base}）")
 
 
 # ========= 统一同步动作（含“最终化”幂等）=========
@@ -180,6 +159,8 @@ def sync_once(mode: str = "PASSIVE", *, reason: str = "periodic", finalize: bool
 
 # ========= Lifespan：安装周期任务 + 信号 + atexit =========
 def setup_lifecycle(app: FastAPI, enable_periodic: bool = True):
+    if not GCS_DB.exists():
+        return
     """main.py 用：from .sync import setup_lifecycle; setup_lifecycle(app)"""
     _periodic_task: asyncio.Task | None = None
 

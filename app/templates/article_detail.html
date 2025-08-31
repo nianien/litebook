@@ -73,6 +73,35 @@
                 {{ article.content }}
             </div>
             
+            <!-- 全新的文章统计信息 -->
+            <div class="article-stats-container">
+                <div class="article-stats-grid">
+                    <div class="stat-card">
+                        <span class="stat-icon-large">👁️</span>
+                        <span class="stat-number" id="view-count">{{ article.view_count or 0 }}</span>
+                        <span class="stat-label">浏览</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-icon-large">❤️</span>
+                        <span class="stat-number" id="like-count">{{ article.like_count or 0 }}</span>
+                        <span class="stat-label">点赞</span>
+                    </div>
+                                            <div class="stat-card">
+                            <span class="stat-icon-large">💬</span>
+                            <span class="stat-number">{{ article.comment_count or 0 }}</span>
+                            <span class="stat-label">评论</span>
+                        </div>
+                </div>
+                
+                <!-- 全新的点赞按钮 -->
+                <div class="like-section">
+                    <button id="like-btn" class="like-button-new" onclick="toggleLike({{ article.id }})" data-article-id="{{ article.id }}">
+                        <span class="like-icon-new" id="like-icon">🤍</span>
+                        <span class="like-text-new" id="like-text">点赞</span>
+                    </button>
+                </div>
+            </div>
+            
             <div class="article-meta right">
                 {{ (article.author.nickname or article.author.username) if article.author else '匿名' }} • {{ article.created_at.strftime('%Y-%m-%d %H:%M') if article.created_at else '' }}
             </div>
@@ -114,11 +143,15 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // 加载评论
     loadComments();
+    
+    // 初始化点赞功能
+    initializeLikeFeature();
 });
 
 // 定义全局变量
 const currentUser = {{ user|tojson if user else 'null' }};
 const currentArticleId = {{ article.id }};
+const currentArticleAuthorId = {{ article.author.id if article.author else 'null' }};
 
 // 评论相关函数
 function loadComments() {
@@ -280,6 +313,91 @@ function hideReplyForm(commentId) {
     document.getElementById(`reply-form-${commentId}`).style.display = 'none';
 }
 
+// 点赞功能相关函数
+function initializeLikeFeature() {
+    // 增加浏览数
+    incrementViewCount();
+    // 获取点赞状态
+    getLikeStatus();
+}
+
+// 增加浏览数
+function incrementViewCount() {
+    fetch(`/api/articles/${currentArticleId}/view`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    }).catch(error => console.error('Error incrementing view count:', error));
+}
+
+// 获取点赞状态
+function getLikeStatus() {
+    fetch(`/api/articles/${currentArticleId}/like-status`)
+        .then(response => response.json())
+        .then(data => {
+            updateLikeButton(data.is_liked);
+        })
+        .catch(error => console.error('Error getting like status:', error));
+}
+
+// 切换点赞状态
+function toggleLike(articleId) {
+    // 检查用户是否已登录
+    if (!currentUser || !currentUser.id) {
+        // 显示登录提示弹窗
+        showLoginPrompt();
+        return;
+    }
+    
+    // 检查是否尝试点赞自己的文章
+    if (currentUser.id == currentArticleAuthorId) {
+        // 显示不能点赞自己文章的提示弹窗
+        showOwnArticlePrompt();
+        return;
+    }
+    
+    fetch(`/api/articles/${articleId}/like`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.message === 'Liked' || data.message === 'Unliked') {
+            updateLikeButton(data.is_liked);
+            document.getElementById('like-count').textContent = data.like_count;
+        } else {
+            // 处理错误情况
+            alert(data.detail || '操作失败');
+        }
+    })
+    .catch(error => {
+        console.error('Error toggling like:', error);
+        alert('操作失败，请重试');
+    });
+}
+
+// 更新点赞按钮状态
+function updateLikeButton(isLiked) {
+    const likeIcon = document.getElementById('like-icon');
+    const likeText = document.getElementById('like-text');
+    const likeBtn = document.getElementById('like-btn');
+    
+    if (likeIcon && likeText && likeBtn) {
+        if (isLiked) {
+            likeIcon.textContent = '❤️';
+            likeText.textContent = '取消点赞';
+            likeBtn.classList.add('liked');
+        } else {
+            likeIcon.textContent = '🤍';
+            likeText.textContent = '点赞';
+            likeBtn.classList.remove('liked');
+        }
+    }
+}
+
 function deleteComment(commentId) {
     if (!confirm('确定要删除这条评论吗？')) {
         return;
@@ -394,4 +512,152 @@ window.addEventListener('DOMContentLoaded', function() {
     });
 });
 </script>
+
+<style>
+/* 登录弹窗样式 */
+.login-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.login-modal-overlay.show {
+    opacity: 1;
+}
+
+.login-modal {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+    max-width: 400px;
+    width: 90%;
+    transform: scale(0.9);
+    transition: transform 0.2s ease;
+}
+
+.login-modal-overlay.show .login-modal {
+    transform: scale(1);
+}
+
+.login-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.login-modal-header h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.login-modal-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    color: #9ca3af;
+    cursor: pointer;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+}
+
+.login-modal-close:hover {
+    background: #f3f4f6;
+    color: #6b7280;
+}
+
+.login-modal-content {
+    padding: 20px 24px 24px;
+}
+
+.login-modal-content p {
+    margin: 0 0 20px 0;
+    color: #6b7280;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.login-modal-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.login-modal-btn {
+    flex: 1;
+    min-width: 80px;
+    padding: 10px 16px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.login-btn {
+    background: #10b981;
+    color: white;
+}
+
+.login-btn:hover {
+    background: #059669;
+}
+
+.register-btn {
+    background: #3b82f6;
+    color: white;
+}
+
+.register-btn:hover {
+    background: #2563eb;
+}
+
+.cancel-btn {
+    background: #f3f4f6;
+    color: #6b7280;
+}
+
+.cancel-btn:hover {
+    background: #e5e7eb;
+    color: #374151;
+}
+
+/* 响应式设计 */
+@media (max-width: 480px) {
+    .login-modal {
+        width: 95%;
+        margin: 20px;
+    }
+    
+    .login-modal-actions {
+        flex-direction: column;
+    }
+    
+    .login-modal-btn {
+        min-width: auto;
+    }
+}
+</style>
+
 {% endblock %} 

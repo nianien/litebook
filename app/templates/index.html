@@ -159,6 +159,36 @@
             <div class="card">
                 <h1>{{ first_article.title }}</h1>
                 <div class="article-content">{{ first_article.content|safe }}</div>
+                
+                <!-- 全新的文章统计信息 -->
+                <div class="article-stats-container">
+                    <div class="article-stats-grid">
+                        <div class="stat-card">
+                            <span class="stat-icon-large">👁️</span>
+                            <span class="stat-number" id="view-count">{{ first_article.view_count or 0 }}</span>
+                            <span class="stat-label">浏览</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-icon-large">❤️</span>
+                            <span class="stat-number" id="like-count">{{ first_article.like_count or 0 }}</span>
+                            <span class="stat-label">点赞</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-icon-large">💬</span>
+                            <span class="stat-number" id="comment-count">{{ first_article.comment_count or 0 }}</span>
+                            <span class="stat-label">评论</span>
+                        </div>
+                    </div>
+                    
+                    <!-- 全新的点赞按钮 -->
+                    <div class="like-section">
+                        <button id="like-btn" class="like-button-new" onclick="toggleLike({{ first_article.id }})" data-article-id="{{ first_article.id }}">
+                            <span class="like-icon-new" id="like-icon">🤍</span>
+                            <span class="like-text-new" id="like-text">点赞</span>
+                        </button>
+                    </div>
+                </div>
+                
                 <div class="article-meta right">
                     {{ (first_article.author.nickname or first_article.author.username) if first_article.author else '匿名' }} • {{ first_article.created_at.strftime('%Y-%m-%d %H:%M') if first_article.created_at else '' }}
                 </div>
@@ -277,6 +307,8 @@ const loadArticle = debounce(function(articleId) {
         ensureModalExists();
         // 延迟加载评论
         setTimeout(() => loadComments(), 50);
+        // 增加浏览数
+        incrementViewCount(articleId);
         return;
     }
     
@@ -315,6 +347,9 @@ const loadArticle = debounce(function(articleId) {
             
             // 确保弹窗在body中
             ensureModalExists();
+            
+            // 增加浏览数
+            incrementViewCount(articleId);
         })
         .catch(function(error) {
             console.error('加载文章失败:', error);
@@ -350,10 +385,40 @@ function updateArticleDisplay(data) {
             '<span class="action-separator">|</span>' +
             '<a href="#" onclick="showDeleteConfirm(' + currentArticleId + '); return false;" class="action-link delete">🗑️ 删除</a>' +
         '</div>' : '') +
-        '<h1>' + data.title + '</h1>' +
-        '<div class="article-content"></div>' +
-        '<div class="article-meta right">' + data.author + ' • ' + data.created_at + '</div>' +
-        '</div>' +
+                  '<h1>' + data.title + '</h1>' +
+          '<div class="article-content"></div>' +
+          
+          '<!-- 全新的文章统计信息 -->' +
+          '<div class="article-stats-container">' +
+          '<div class="article-stats-grid">' +
+          '<div class="stat-card">' +
+          '<span class="stat-icon-large">👁️</span>' +
+          '<span class="stat-number" id="view-count">' + (data.view_count || 0) + '</span>' +
+          '<span class="stat-label">浏览</span>' +
+          '</div>' +
+          '<div class="stat-card">' +
+          '<span class="stat-icon-large">❤️</span>' +
+          '<span class="stat-number" id="like-count">' + (data.like_count || 0) + '</span>' +
+          '<span class="stat-label">点赞</span>' +
+          '</div>' +
+          '<div class="stat-card">' +
+          '<span class="stat-icon-large">💬</span>' +
+          '<span class="stat-number" id="comment-count">' + (data.comment_count || 0) + '</span>' +
+          '<span class="stat-label">评论</span>' +
+          '</div>' +
+          '</div>' +
+          
+          '<!-- 全新的点赞按钮 -->' +
+          '<div class="like-section">' +
+          '<button id="like-btn" class="like-button-new" onclick="toggleLike(' + currentArticleId + ')" data-article-id="' + currentArticleId + '">' +
+          '<span class="like-icon-new" id="like-icon">🤍</span>' +
+          '<span class="like-text-new" id="like-text">点赞</span>' +
+          '</button>' +
+          '</div>' +
+          '</div>' +
+          
+          '<div class="article-meta right">' + data.author + ' • ' + data.created_at + '</div>' +
+          '</div>' +
         '<div class="comments-section">' +
         '<h3>💬 评论</h3>' +
         '<div class="comment-form">' +
@@ -381,6 +446,9 @@ function updateArticleDisplay(data) {
     
     // 延迟加载评论
     setTimeout(() => loadComments(), 50);
+    
+    // 延迟初始化点赞功能，确保DOM完全准备好
+    setTimeout(() => initializeLikeFeature(), 100);
 }
 
 // 页面初始化
@@ -661,6 +729,9 @@ const submitComment = debounce(function() {
         // 清除相关缓存
         PERFORMANCE_CACHE.delete('comments_' + currentArticleId);
         loadComments();
+        
+        // 更新评论数量显示
+        updateCommentCount();
     })
     .catch(error => {
         console.error('提交评论失败:', error);
@@ -698,6 +769,9 @@ const submitReply = debounce(function(parentId) {
         // 清除相关缓存
         PERFORMANCE_CACHE.delete('comments_' + currentArticleId);
         loadComments();
+        
+        // 更新评论数量显示
+        updateCommentCount();
     })
     .catch(error => {
         console.error('提交回复失败:', error);
@@ -773,6 +847,9 @@ function confirmDeleteComment(commentId) {
             // 清除相关缓存
             PERFORMANCE_CACHE.delete('comments_' + currentArticleId);
             loadComments();
+            
+            // 更新评论数量显示
+            updateCommentCount();
         } else {
             alert('删除评论失败，请重试');
         }
@@ -864,6 +941,9 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // 确保弹窗存在
     ensureModalExists();
+    
+    // 初始化点赞功能
+    initializeLikeFeature();
 
     // 恢复分组折叠状态（含最新/热门与分类分组）
     try {
@@ -892,7 +972,271 @@ setInterval(() => {
             PERFORMANCE_CACHE.delete(key);
         }
     }
-}, 5 * 60 * 1000); // 每5分钟清理一次
+  }, 5 * 60 * 1000); // 每5分钟清理一次
+
+// 初始化点赞功能
+function initializeLikeFeature() {
+    const likeBtn = document.getElementById('like-btn');
+    if (likeBtn) {
+        const articleId = likeBtn.getAttribute('data-article-id');
+        if (articleId) {
+            // 获取点赞状态和数量
+            getLikeStatus(parseInt(articleId));
+        }
+    }
+    
+    // 如果是首页第一篇文章，也要获取最新数据
+    const firstArticleId = document.querySelector('[data-article-id]');
+    if (firstArticleId && !likeBtn) {
+        const articleId = firstArticleId.getAttribute('data-article-id');
+        if (articleId) {
+            // 获取最新的点赞数量
+            fetch(`/article/${articleId}/content`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.like_count !== undefined) {
+                        const likeCountElement = document.getElementById('like-count');
+                        if (likeCountElement) {
+                            likeCountElement.textContent = data.like_count;
+                        }
+                    }
+                    if (data.view_count !== undefined) {
+                        const viewCountElement = document.getElementById('view-count');
+                        if (viewCountElement) {
+                            viewCountElement.textContent = data.view_count;
+                        }
+                    }
+                    if (data.comment_count !== undefined) {
+                        const commentCountElement = document.getElementById('comment-count');
+                        if (commentCountElement) {
+                            commentCountElement.textContent = data.comment_count;
+                        }
+                    }
+                })
+                .catch(error => console.error('Error getting first article data:', error));
+        }
+    }
+}
+
+// 增加浏览数
+function incrementViewCount(articleId) {
+    fetch(`/api/articles/${articleId}/view`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    }).catch(error => console.error('Error incrementing view count:', error));
+}
+
+// 获取点赞状态和数量
+function getLikeStatus(articleId) {
+    fetch(`/api/articles/${articleId}/like-status`)
+        .then(response => response.json())
+        .then(data => {
+            updateLikeButton(data.is_liked);
+        })
+        .catch(error => console.error('Error getting like status:', error));
+    
+    // 同时获取最新的点赞数量
+    fetch(`/article/${articleId}/content`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.like_count !== undefined) {
+                const likeCountElement = document.getElementById('like-count');
+                if (likeCountElement) {
+                    likeCountElement.textContent = data.like_count;
+                }
+            }
+        })
+        .catch(error => console.error('Error getting article data:', error));
+}
+
+// 全新的点赞功能
+function toggleLike(articleId) {
+    // 检查用户是否已登录
+    if (!currentUser || !currentUser.id) {
+        // 显示登录提示弹窗
+        showLoginPrompt();
+        return;
+    }
+    
+    // 检查是否尝试点赞自己的文章
+    if (currentUser.id == currentArticleAuthorId) {
+        // 显示不能点赞自己文章的提示弹窗
+        showOwnArticlePrompt();
+        return;
+    }
+    
+    fetch(`/api/articles/${articleId}/like`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.message === 'Liked' || data.message === 'Unliked') {
+            updateLikeButton(data.is_liked);
+            // 立即更新点赞数量显示
+            const likeCountElement = document.getElementById('like-count');
+            if (likeCountElement) {
+                likeCountElement.textContent = data.like_count;
+            }
+            // 同时更新浏览数量（如果有的话）
+            if (data.view_count !== undefined) {
+                const viewCountElement = document.getElementById('view-count');
+                if (viewCountElement) {
+                    viewCountElement.textContent = data.view_count;
+                }
+            }
+        } else {
+            // 处理错误情况
+            alert(data.detail || '操作失败');
+        }
+    })
+    .catch(error => {
+        console.error('Error toggling like:', error);
+        alert('操作失败，请重试');
+    });
+}
+
+// 更新点赞按钮状态
+function updateLikeButton(isLiked) {
+    const likeIcon = document.getElementById('like-icon');
+    const likeText = document.getElementById('like-text');
+    const likeBtn = document.getElementById('like-btn');
+    
+    if (likeIcon && likeText && likeBtn) {
+        if (isLiked) {
+            likeIcon.textContent = '❤️';
+            likeText.textContent = '取消点赞';
+            likeBtn.classList.add('liked');
+        } else {
+            likeIcon.textContent = '🤍';
+            likeText.textContent = '点赞';
+            likeBtn.classList.remove('liked');
+        }
+    }
+}
+
+// 更新评论数量显示
+function updateCommentCount() {
+    if (!currentArticleId) return;
+    
+    // 获取最新的评论数量
+    fetch(`/article/${currentArticleId}/content`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.comment_count !== undefined) {
+                const commentCountElement = document.getElementById('comment-count');
+                if (commentCountElement) {
+                    commentCountElement.textContent = data.comment_count;
+                }
+            }
+        })
+        .catch(error => console.error('Error updating comment count:', error));
+}
+
+// 显示登录提示弹窗
+function showLoginPrompt() {
+    // 创建弹窗元素
+    const modal = document.createElement('div');
+    modal.className = 'login-modal-overlay';
+    modal.innerHTML = `
+        <div class="login-modal">
+            <div class="login-modal-header">
+                <h3>🔒 需要登录</h3>
+                <button class="login-modal-close" onclick="closeLoginPrompt()">&times;</button>
+            </div>
+            <div class="login-modal-content">
+                <p>点赞功能需要登录后才能使用</p>
+                <div class="login-modal-actions">
+                    <a href="/login" class="login-modal-btn login-btn">立即登录</a>
+                    <a href="/register" class="login-modal-btn register-btn">注册账号</a>
+                    <button class="login-modal-btn cancel-btn" onclick="closeLoginPrompt()">取消</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // 添加到页面
+    document.body.appendChild(modal);
+    
+    // 点击遮罩层关闭弹窗
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            closeLoginPrompt();
+        }
+    });
+    
+    // 添加动画效果
+    setTimeout(() => {
+        modal.classList.add('show');
+    }, 10);
+}
+
+// 关闭登录提示弹窗
+function closeLoginPrompt() {
+    const modal = document.querySelector('.login-modal-overlay');
+    if (modal) {
+        modal.classList.remove('show');
+        setTimeout(() => {
+            if (modal.parentNode) {
+                modal.parentNode.removeChild(modal);
+            }
+        }, 200);
+    }
+}
+
+// 显示不能点赞自己文章的提示弹窗
+function showOwnArticlePrompt() {
+    // 创建弹窗元素
+    const modal = document.createElement('div');
+    modal.className = 'login-modal-overlay';
+    modal.innerHTML = `
+        <div class="login-modal">
+            <div class="login-modal-header">
+                <h3>💡 温馨提示</h3>
+                <button class="login-modal-close" onclick="closeOwnArticlePrompt()">&times;</button>
+            </div>
+            <div class="login-modal-content">
+                <p>不能给自己的文章点赞哦～</p>
+                <p style="font-size: 12px; color: #9ca3af; margin-top: 8px;">鼓励其他作者，为他们的好文章点赞吧！</p>
+                <div class="login-modal-actions">
+                    <button class="login-modal-btn cancel-btn" onclick="closeOwnArticlePrompt()">知道了</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // 添加到页面
+    document.body.appendChild(modal);
+    
+    // 点击遮罩层关闭弹窗
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            closeOwnArticlePrompt();
+        }
+    });
+    
+    // 添加动画效果
+    setTimeout(() => {
+        modal.classList.add('show');
+    }, 10);
+}
+
+// 关闭不能点赞自己文章的提示弹窗
+function closeOwnArticlePrompt() {
+    const modal = document.querySelector('.login-modal-overlay');
+    if (modal) {
+        modal.classList.remove('show');
+        setTimeout(() => {
+            if (modal.parentNode) {
+                modal.parentNode.removeChild(modal);
+            }
+        }, 200);
+    }
+}
 </script>
 <style>
 .collapsible {
@@ -964,5 +1308,149 @@ setInterval(() => {
     border: 1px solid #fecaca;
 }
 /* Modal styles now in style.css */
+/* 登录弹窗样式 */
+.login-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.login-modal-overlay.show {
+    opacity: 1;
+}
+
+.login-modal {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+    max-width: 400px;
+    width: 90%;
+    transform: scale(0.9);
+    transition: transform 0.2s ease;
+}
+
+.login-modal-overlay.show .login-modal {
+    transform: scale(1);
+}
+
+.login-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.login-modal-header h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.login-modal-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    color: #9ca3af;
+    cursor: pointer;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+}
+
+.login-modal-close:hover {
+    background: #f3f4f6;
+    color: #6b7280;
+}
+
+.login-modal-content {
+    padding: 20px 24px 24px;
+}
+
+.login-modal-content p {
+    margin: 0 0 20px 0;
+    color: #6b7280;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.login-modal-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.login-modal-btn {
+    flex: 1;
+    min-width: 80px;
+    padding: 10px 16px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.login-btn {
+    background: #10b981;
+    color: white;
+}
+
+.login-btn:hover {
+    background: #059669;
+}
+
+.register-btn {
+    background: #3b82f6;
+    color: white;
+}
+
+.register-btn:hover {
+    background: #2563eb;
+}
+
+.cancel-btn {
+    background: #f3f4f6;
+    color: #6b7280;
+}
+
+.cancel-btn:hover {
+    background: #e5e7eb;
+    color: #374151;
+}
+
+/* 响应式设计 */
+@media (max-width: 480px) {
+    .login-modal {
+        width: 95%;
+        margin: 20px;
+    }
+    
+    .login-modal-actions {
+        flex-direction: column;
+    }
+    
+    .login-modal-btn {
+        min-width: auto;
+    }
+}
 </style>
 {% endblock %}
