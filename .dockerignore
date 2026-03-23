@@ -6,7 +6,17 @@ service-account-key.json
 *.pem
 *.key
 
-# 排除 SQLite 相关文件（WAL/SHM）
-*.db-wal
-*.db-shm
-*.db
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# 版本控制和开发工具
+.git/
+.idea/
+.vscode/
+test/
+*.md
+.DS_Store

@@ -8,19 +8,16 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from . import models, schemas, crud, auth, deps
-from .sync import setup_lifecycle
 
 app = FastAPI(
-    title="LiteBlog",
-    description="A simple blog system",
+    title="LiteBook",
+    description="A simple writing system",
     version="1.0.0",
     docs_url=None,
-    redoc_url=None
+    redoc_url=None,
 )
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
-
-setup_lifecycle(app, enable_periodic=True)
 
 # 保留用户名前缀，避免与系统路由冲突
 RESERVED_USERNAMES = {"u"}
@@ -303,9 +300,6 @@ def read_article(request: Request, article_id: int, db: Session = Depends(deps.g
         return RedirectResponse("/", status_code=302)
 
     user = get_current_user_from_cookie(request, db)
-    user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
-    if user_id:
-        crud.add_view_record(db, user_id, int(article_id))
 
     grouped_data = get_grouped_data(db, request)
     user_dict = serialize_user(user)
@@ -397,7 +391,7 @@ def get_article_content(article_id: int, request: Request, db: Session = Depends
     user = get_current_user_from_cookie(request, db)
     user_id = int(getattr(user, 'id', 0)) if user and hasattr(user, 'id') and isinstance(user.id, (int, str)) else None
     # 浏览历史功能已移除
-    can_edit = user_id == int(article.author_id) if article.author else False
+    can_edit = user_id is not None and article.author_id is not None and user_id == int(article.author_id)
 
     # 返回原始内容，不进行HTML转义
     content = str(article.content) if article.content else ""

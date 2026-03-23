@@ -75,15 +75,6 @@ def delete_article(db: Session, article_id: int):
     return db_article
 
 
-def add_view_record(db: Session, user_id: int, article_id: int):
-    # 已废弃：浏览历史功能移除
-    return None
-
-
-def get_view_records(db: Session, user_id: int):
-    # 已废弃：浏览历史功能移除
-    return []
-
 
 def get_articles_by_category(db: Session, category: str, skip=0, limit=10):
     return db.query(models.Article).filter(models.Article.category == category).order_by(
@@ -264,11 +255,14 @@ def delete_comment(db: Session, comment_id: int, user_id: int) -> Optional[model
     # 计算总共删除的评论数量
     total_deleted = deleted_replies + 1
 
+    # 保存 article_id（commit 后 comment 对象属性不可访问）
+    article_id = comment.article_id
+
     # 提交删除操作
     db.commit()
 
     # 更新文章的评论数量
-    article = db.query(models.Article).filter(models.Article.id == comment.article_id).first()
+    article = db.query(models.Article).filter(models.Article.id == article_id).first()
     if article and article.comment_count >= total_deleted:
         article.comment_count -= total_deleted
         db.commit()

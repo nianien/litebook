@@ -82,7 +82,3 @@ local_settings.py
 *.orig
 *.rej
 
-# 排除 SQLite 相关文件（WAL/SHM）
-*.db-wal
-*.db-shm
-*.db

@@ -47,14 +47,6 @@ class ArticleOut(ArticleBase):
         from_attributes = True
 
 
-class ViewRecordOut(BaseModel):
-    id: int
-    article_id: int
-    viewed_at: datetime
-
-    class Config:
-        from_attributes = True
-
 
 # 评论相关模式
 class CommentBase(BaseModel):
